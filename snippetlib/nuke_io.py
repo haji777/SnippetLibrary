@@ -2,6 +2,8 @@
 """Nuke side: save selected nodes as .nk (nuke.nodeCopy), load with nodePaste."""
 
 import os
+import shutil
+import tempfile
 
 import nuke
 
@@ -83,7 +85,11 @@ def save_nodes(title, description="", tags=None, context="comp"):
     """Saves the current selection."""
     info = core.new_snippet("nuke", context, title)
     try:
-        nuke.nodeCopy(info["payload"])
+        # nodeCopy / nodePaste choke on non-ASCII paths (e.g. a Japanese title), so
+        # Nuke only ever sees an ASCII file name; python does the final rename.
+        tmp = os.path.join(info["dir"], "payload_%d.nk" % os.getpid())
+        nuke.nodeCopy(tmp)
+        os.replace(tmp, info["payload"])
         graph = graphmod.from_nk(core.read_text(info["payload"]), context,
                                  nuke.NUKE_VERSION_STRING)
         try:
@@ -114,6 +120,27 @@ def save_selected_dialog():
 
 
 # ---------------------------------------------------------------------- load
+def _node_paste(path):
+    """nuke.nodePaste with a non-ASCII path goes through an ASCII temp copy."""
+    try:
+        path.encode("ascii")
+    except UnicodeEncodeError:
+        pass
+    else:
+        nuke.nodePaste(path)
+        return
+    fd, tmp = tempfile.mkstemp(prefix="snippetlib_", suffix=".nk")
+    os.close(fd)
+    try:
+        shutil.copyfile(path, tmp)
+        nuke.nodePaste(tmp)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def load(payload_path, meta=None):
     if not os.path.isfile(payload_path):
         raise RuntimeError("読み込めません: %s" % payload_path)
@@ -123,7 +150,7 @@ def load(payload_path, meta=None):
         center = nuke.center()
     except Exception:
         center = None
-    nuke.nodePaste(payload_path)
+    _node_paste(payload_path)
     nodes = nuke.selectedNodes()
     if center and nodes:  # move the pasted block to the middle of the DAG view
         xs = [n.xpos() for n in nodes]
