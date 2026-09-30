@@ -49,7 +49,20 @@ def api_state(_q):
             "profiles": core.all_profiles([l["path"] for l in libs if not l.get("missing")]),
             "palette": core.PALETTE, "root": core.library_root().replace("\\", "/"),
             "root_source": core.root_source(),
-            "default_root": core.default_root().replace("\\", "/")}
+            "default_root": core.default_root().replace("\\", "/"),
+            "logos": app_logos()}
+
+
+def app_logos():
+    """viewer/static/logos/<app>.(svg|png|webp|jpg) -> {app: file}. Not shipped:
+    the Houdini / Nuke marks are trademarks, users drop their own copies in."""
+    out = {}
+    for ext in ("svg", "png", "webp", "jpg"):
+        for app in core.APPS:
+            fn = "%s.%s" % (app, ext)
+            if app not in out and os.path.isfile(os.path.join(STATIC, "logos", fn)):
+                out[app] = fn
+    return out
 
 
 def api_snippets(_q):

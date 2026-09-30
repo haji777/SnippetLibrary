@@ -16,3 +16,7 @@ desktop.ini
 # library data that may land next to the code by mistake
 _config/
 _trash/
+
+# app logos are user supplied (trademarks)
+viewer/static/logos/*
+!viewer/static/logos/README.md

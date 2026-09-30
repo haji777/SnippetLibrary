@@ -81,6 +81,8 @@ function userChip(user, extra) {
 
 function appBadge(app) {
   const a = APP_INFO[app] || { label: app, color: "#888" };
+  const logo = (S.state.logos || {})[app];  // viewer/static/logos/<app>.png|svg, if the user put one there
+  if (logo) return h("img", { class: "applogo", src: "logos/" + logo, alt: a.label, title: a.label });
   return h("span", { class: "badge app", style: { "--c": a.color }, text: a.label });
 }
 
