@@ -282,6 +282,7 @@ async function showDetail(lib, rel) {
       h("div", { class: "dtitle" }, titleBox(),
         h("div", { class: "dsub" }, appBadge(meta.app), h("span", { class: "ver strong", text: versionText(meta) }), ctxBadge(meta.context),
           userChip(meta.user), libBadge(lib), h("span", { class: "muted", text: (meta.created || "").replace("T", " ") }),
+          h("code", { class: "fname", title: "ファイル名（保存時に決まり、タイトル変更では変わりません）", text: (data.payload || "").split("/").pop() }),
           meta.scene ? h("span", { class: "muted", text: "from " + meta.scene }) : null,
           meta.origin ? h("span", { class: "muted", text: `⇠ ${meta.origin} (${meta.author || "?"})` }) : null)),
       h("span", { class: "spacer" }),
@@ -309,9 +310,7 @@ async function showDetail(lib, rel) {
       if (!title || title === meta.title) return cancel();
       try {
         Object.assign(meta, (await api("/api/update", { lib, rel, title })).meta);
-        // file names follow the title, so refresh the payload path shown / copied here
-        data.payload = (await api(`/api/snippet?lib=${lib}&rel=${encodeURIComponent(rel)}`)).payload;
-        toast("タイトルを変更しました", "ok");
+        toast("タイトルを変更しました（ファイル名はそのまま）", "ok");
       } catch (err) { toast(err.message, "error"); }
       cancel();
     };

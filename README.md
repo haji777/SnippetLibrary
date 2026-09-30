@@ -2,7 +2,8 @@
 
 Houdini / Nuke のノードスニペットを **ファイルだけ**（DB なし）で管理するライブラリ。
 
-- DCC でノードを選択 → **Save Selection to Library**（タイトル・説明・タグ）
+- DCC でノードを選択 → **Save Selection to Library**（タイトル・ファイル名・説明・タグ）
+  - **タイトル**は表示名（日本語可）、**ファイル名**は半角英数字のみ。ダイアログに実際のファイル名がプレビューされます
 - ビューアーで一覧（ソフト / ユーザー / コンテキスト / ライブラリで絞り込み、時系列、👑殿堂入り）
 - スニペットを開くとノードネットワークを描画。ノードをクリックで**変更されたパラメータ**、
   ダブルクリックで subnet / Group の中へ
@@ -15,9 +16,9 @@ Houdini / Nuke のノードスニペットを **ファイルだけ**（DB なし
   _config/library.json                   ライブラリ名・色・リンク先ライブラリ
   _config/profiles/<user>.json           ユーザー毎のプロファイル（表示名・カラー）
   houdini/<user>/<context>/<YYYYMMDD.NNN>/
-      <user>_<context>_<title>.json        本体: hou.data.itemsAsData() の JSON（Houdini 20+）
-      <user>_<context>_<title>.md          メタ情報(frontmatter) + 説明 + ノード/変更パラメータ一覧
-      <user>_<context>_<title>.graph.json  ビューアー描画用（位置・接続・階層・変更パラメータ）
+      <user>_<context>_<name>.json         本体: hou.data.itemsAsData() の JSON（Houdini 20+）
+      <user>_<context>_<name>.md           メタ情報(frontmatter) + 説明 + ノード/変更パラメータ一覧
+      <user>_<context>_<name>.graph.json   ビューアー描画用（位置・接続・階層・変更パラメータ）
   nuke/<user>/<context>/<YYYYMMDD.NNN>/
       ....nk / .md / .graph.json           本体は nuke.nodeCopy() の .nk
 ```
@@ -27,8 +28,8 @@ frontmatter は Obsidian のプロパティとしても読めます（ライブ�
 `.graph.json` が無くても、ビューアーは `.json` / `.nk` 本体からネットワークを復元します。
 
 ### タイトル変更と削除
-- **タイトル変更**（ビューアー詳細画面の ✎ / タイトルをダブルクリック）: `.md` の `title` に加えて、フォルダ内の
-  `.json/.nk`・`.graph.json`・`.md` のファイル名も新タイトルに合わせてリネームします。フォルダ名（ID）は変わらないのでリンクは切れません
+- **タイトル変更**（ビューアー詳細画面の ✎ / タイトルをダブルクリック）: 表示名だけが変わります。
+  ファイル名（`<user>_<context>_<name>.*`、`name` は保存時に決めた半角英数字）とフォルダ名（ID）は変わらないのでリンクは切れません
 - **削除**（詳細画面の 🗑）: ファイルは消さず `<library root>/_trash/<app>/<user>/<context>/<ID>__<削除日時>/` へ移動。
   `.md` に `deleted` / `deleted_by` / `deleted_from` を記録します。復元はフォルダを `deleted_from` の場所へ戻すだけ
   （`_` で始まるフォルダは一覧のスキャン対象外）
@@ -95,7 +96,7 @@ nuke.pluginAddPath("C:/path/to/SnippetLibrary/nuke")  # このリポジトリの
 
 ## 既存ファイルの登録
 ```
-py -3 tools/register.py B:/path/to/snippet.json --title "..." --context cop --app-version 22.0.429 --desc "..." --tags a,b
+py -3 tools/register.py B:/path/to/snippet.json --title "表示名" --name ascii_name --context cop --app-version 22.0.429 --desc "..." --tags a,b
 py -3 tools/register.py B:/path/to/tool.nk --title "..." --context comp
 ```
 

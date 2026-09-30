@@ -31,8 +31,17 @@ class SaveDialog(QtWidgets.QDialog):
             "<span style='color:%s'>&#9679;</span> <b>%s</b> &nbsp; "
             "<span style='color:%s'>&#9632;</span> %s &nbsp; %d nodes"
             % (APP_COLORS.get(app, "#888"), app, profile["color"], profile["display"], node_count))
+        self.app, self.user = app, profile["user"]
         self.title = QtWidgets.QLineEdit()
-        self.title.setPlaceholderText("タイトル（ファイル名になります）")
+        self.title.setPlaceholderText("表示タイトル（日本語OK）")
+        self.name = QtWidgets.QLineEdit()
+        self.name.setPlaceholderText("半角英数字 _ - のみ（ファイル名に使われます）")
+        self.name.setValidator(QtGui.QRegularExpressionValidator(
+            QtCore.QRegularExpression(r"[A-Za-z0-9_\-. ]*"), self.name))
+        self._name_edited = False
+        self.preview = QtWidgets.QLabel()
+        self.preview.setStyleSheet("color: gray; font-family: Consolas, monospace;")
+        self.preview.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         self.context = QtWidgets.QComboBox()
         self.context.addItems(contexts or [context])
         self.context.setEditable(bool(contexts))
@@ -49,6 +58,8 @@ class SaveDialog(QtWidgets.QDialog):
 
         form = QtWidgets.QFormLayout()
         form.addRow("Title", self.title)
+        form.addRow("File name", self.name)
+        form.addRow("", self.preview)
         form.addRow("Context", self.context)
         form.addRow("Tags", self.tags)
         form.addRow("Description", self.description)
@@ -63,16 +74,45 @@ class SaveDialog(QtWidgets.QDialog):
         layout.addWidget(header)
         layout.addLayout(form)
         layout.addWidget(buttons)
+        self.title.textChanged.connect(self._title_changed)
+        self.name.textEdited.connect(self._name_edited_by_user)
+        self.name.textChanged.connect(self._update_preview)
+        self.context.currentTextChanged.connect(self._update_preview)
+        self._update_preview()
         self.title.setFocus()
 
+    def _title_changed(self, text):
+        # follow the title while the user has not typed a file name themselves
+        if not self._name_edited:
+            self.name.blockSignals(True)
+            self.name.setText(core.ascii_slug(text))
+            self.name.blockSignals(False)
+        self._update_preview()
+
+    def _name_edited_by_user(self, text):
+        self._name_edited = bool(text.strip())
+
+    def _update_preview(self, *_):
+        slug = core.ascii_slug(self.name.text())
+        ext = core.PAYLOAD_EXT.get(self.app, "")
+        context = core.safe_name(self.context.currentText()).lower() or "misc"
+        if slug:
+            self.preview.setText("→ %s_%s_%s%s" % (self.user, context, slug, ext))
+        else:
+            self.preview.setText("→ ファイル名を半角英数字で入力してください")
+
     def _accept(self):
-        if not core.safe_name(self.title.text()):
+        if not self.title.text().strip():
             self.title.setFocus()
+            return
+        if not core.ascii_slug(self.name.text()):
+            self.name.setFocus()
             return
         self.accept()
 
     def values(self):
         return {"title": self.title.text().strip(),
+                "name": core.ascii_slug(self.name.text()),
                 "context": self.context.currentText().strip(),
                 "tags": [t.strip() for t in self.tags.text().split(",") if t.strip()],
                 "description": self.description.toPlainText().strip()}

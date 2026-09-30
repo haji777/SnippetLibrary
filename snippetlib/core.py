@@ -113,6 +113,14 @@ def safe_name(text):
     return re.sub(r"\s+", "_", text)[:80]
 
 
+def ascii_slug(text):
+    """File-name part: ASCII letters, digits, '_' '-' '.' only (DCCs such as Nuke
+    cannot handle non-ASCII paths). Anything else is dropped, so a Japanese
+    title yields "" and the caller must ask for a name."""
+    text = re.sub(r"[^A-Za-z0-9_\-. ]", "", text or "").strip().strip(".")
+    return re.sub(r"\s+", "_", text)[:60]
+
+
 def now_iso():
     return datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -380,8 +388,10 @@ def all_profiles(roots):
 # --------------------------------------------------------------------------
 # snippets
 # --------------------------------------------------------------------------
-def new_snippet(app, context, title, user=None, root=None):
-    """Allocate <root>/<app>/<user>/<context>/<YYYYMMDD.NNN>/ atomically."""
+def new_snippet(app, context, title, user=None, root=None, name=None):
+    """Allocate <root>/<app>/<user>/<context>/<YYYYMMDD.NNN>/ atomically.
+    title = display title (any language); name = ASCII file-name part.
+    Files are <user>_<context>_<name>.*, the folder is the id."""
     if app not in APPS:
         raise ValueError("unknown app: %s" % app)
     root = root or library_root()
@@ -397,9 +407,10 @@ def new_snippet(app, context, title, user=None, root=None):
             os.mkdir(path)  # atomic: two writers can never get the same id
         except FileExistsError:
             continue
-        base = "%s_%s_%s" % (user, context, safe_name(title) or "untitled")
+        name = ascii_slug(name) or ascii_slug(title) or "untitled"
+        base = "%s_%s_%s" % (user, context, name)
         return {"root": root, "dir": path, "id": sid, "app": app, "user": user,
-                "context": context, "title": title, "base": base,
+                "context": context, "title": title, "name": name, "base": base,
                 "payload": os.path.join(path, base + PAYLOAD_EXT[app]),
                 "graph": os.path.join(path, base + GRAPH_EXT),
                 "md": os.path.join(path, base + ".md")}
@@ -420,6 +431,7 @@ def finalize_snippet(info, description="", tags=None, graph=None, extra=None):
         "context": info["context"],
         "user": info["user"],
         "id": info["id"],
+        "name": info.get("name", ""),
         "created": now,
         "modified": now,
         "crown": False,
@@ -460,9 +472,7 @@ def update_snippet(md_path, title=None, description=None, tags=None, crown=None)
     for _ in range(3):
         mtime = os.stat(md_path).st_mtime_ns
         meta, body = parse_md(read_text(md_path))
-        renamed = False
-        if title is not None and title.strip() and title.strip() != meta.get("title"):
-            renamed = True
+        if title is not None and title.strip():
             meta["title"] = title.strip()
             lines = body.split("\n")
             if lines and lines[0].startswith("# "):
@@ -478,10 +488,7 @@ def update_snippet(md_path, title=None, description=None, tags=None, crown=None)
         meta["modified_by"] = current_user()
         if os.stat(md_path).st_mtime_ns != mtime:
             continue  # somebody else wrote in between: re-read and retry
-        target = _rename_files(md_path, meta) if renamed else md_path
-        write_text_atomic(target, dump_md(meta, body))
-        if target != md_path:
-            os.remove(md_path)
+        write_text_atomic(md_path, dump_md(meta, body))
         return meta
     raise RuntimeError("他のユーザーが同時に編集中です。もう一度試してください。")
 
@@ -496,27 +503,6 @@ def _snippet_files(sdir):
         elif low.endswith(tuple(PAYLOAD_EXT.values())):
             found["payload"] = fn
     return found
-
-
-def _rename_files(md_path, meta):
-    """File names follow the title: <user>_<context>_<title>.*  (the folder = id stays,
-    so links to the snippet keep working). Returns the new md path."""
-    sdir = os.path.dirname(md_path)
-    base = "%s_%s_%s" % (meta.get("user", ""), meta.get("context", ""),
-                         safe_name(meta.get("title", "")) or "untitled")
-    found = _snippet_files(sdir)
-    for key, ext in (("payload", PAYLOAD_EXT.get(meta.get("app"), ".json")), ("graph", GRAPH_EXT)):
-        old = found[key]
-        if not old:
-            continue
-        new = base + ext
-        if new != old:
-            try:
-                os.rename(os.path.join(sdir, old), os.path.join(sdir, new))
-            except OSError:  # open in another application: keep the old file name
-                new = old
-        meta[key] = new
-    return os.path.join(sdir, base + ".md")
 
 
 def read_snippet(root, rel):
@@ -581,7 +567,7 @@ def import_snippet(src_root, rel, src_lib_name="", root=None, user=None):
     src = read_snippet(src_root, rel)
     meta = src["meta"]
     info = new_snippet(meta.get("app"), meta.get("context", "misc"),
-                       meta.get("title", ""), user=user, root=root)
+                       meta.get("title", ""), user=user, root=root, name=meta.get("name"))
     try:
         for fn in os.listdir(src["dir"]):
             if not fn.lower().endswith((".md", ".tmp")):

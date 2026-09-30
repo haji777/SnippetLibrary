@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Register an existing payload (.json from hou.data / .nk) without opening the DCC.
 
-    py -3 tools/register.py FILE --title "..." [--context cop] [--desc "..."]
+    py -3 tools/register.py FILE --title "..." [--name ascii_name] [--context cop] [--desc "..."]
                                  [--tags a,b] [--app-version 22.0.429] [--user name]
 
 The app is taken from the extension (.json = houdini, .nk = nuke). The network
@@ -22,7 +22,8 @@ from snippetlib import core, graph  # noqa: E402
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("file")
-    ap.add_argument("--title")
+    ap.add_argument("--title", help="display title (any language)")
+    ap.add_argument("--name", help="ASCII file-name part (default: derived from the title / file)")
     ap.add_argument("--context", default=None)
     ap.add_argument("--desc", default="")
     ap.add_argument("--tags", default="")
@@ -37,7 +38,8 @@ def main():
     context = args.context or ("comp" if app == "nuke" else "sop")
     title = args.title or os.path.splitext(os.path.basename(args.file))[0]
 
-    info = core.new_snippet(app, context, title, user=args.user)
+    name = args.name or core.ascii_slug(title) or core.ascii_slug(os.path.splitext(os.path.basename(args.file))[0])
+    info = core.new_snippet(app, context, title, user=args.user, name=name)
     try:
         shutil.copyfile(args.file, info["payload"])
         if app == "nuke":
