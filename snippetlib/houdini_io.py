@@ -77,11 +77,11 @@ def _enrich(net, parent):
             _enrich(node["network"], live)
 
 
-def save_items(items, title, description="", tags=None, context=None, name=None):
+def save_items(items, title, description="", tags=None, context=None, name=None, root=None):
     parent = items[0].parent()
     context = context or context_of(parent)
     data = hou.data.itemsAsData(items, anchor_position=_anchor(items))
-    info = core.new_snippet("houdini", context, title, name=name)
+    info = core.new_snippet("houdini", context, title, name=name, root=root)
     try:
         core.write_json_atomic(info["payload"], data)
         graph = graphmod.from_houdini_data(data, context, hou.applicationVersionString())
@@ -115,7 +115,7 @@ def save_selected_dialog():
     if not values:
         return
     info = save_items(items, values["title"], values["description"], values["tags"],
-                      name=values["name"])
+                      name=values["name"], root=values["root"])
     hou.ui.setStatusMessage("Snippet Library: saved %s" % info["dir"])
 
 

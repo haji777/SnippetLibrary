@@ -102,6 +102,8 @@ def api_links(body):
             core.add_link(body["path"].strip().strip('"'), body.get("name", "").strip())
         elif body.get("action") == "remove":
             core.remove_link(body["path"])
+        elif body.get("action") == "create":
+            core.create_library(body.get("path", ""), body.get("name", "").strip())
         elif body.get("action") == "library":
             core.set_library_info(name=body.get("name"), color=body.get("color"))
     return {"libraries": libraries()}
@@ -125,12 +127,16 @@ def api_load(body):
         "action": "load", "payload": snip["payload"], "meta": snip["meta"]})
 
 
-def api_import(body):
+def api_copy(body):
+    """Copy a snippet from library `lib` into library `to` (defaults to primary)."""
     lib = lib_by_id(body["lib"])
-    if lib["primary"]:
-        raise ApiError("すでにこのライブラリにあります")
-    rel = core.import_snippet(lib["path"], body["rel"], lib["name"])
-    return {"lib": 0, "rel": rel}
+    dest = lib_by_id(body.get("to", 0))
+    if dest["id"] == lib["id"]:
+        raise ApiError("同じライブラリです")
+    if dest.get("missing"):
+        raise ApiError("コピー先のライブラリが見つかりません: %s" % dest["path"])
+    rel = core.import_snippet(lib["path"], body["rel"], lib["name"], root=dest["path"])
+    return {"lib": dest["id"], "rel": rel, "name": dest["name"]}
 
 
 def api_delete(body):
@@ -151,7 +157,7 @@ def api_reveal(body):
 GET = {"/api/state": api_state, "/api/snippets": api_snippets, "/api/snippet": api_snippet,
        "/api/payload": api_payload, "/api/sessions": api_sessions}
 POST = {"/api/update": api_update, "/api/profile": api_profile, "/api/links": api_links,
-        "/api/load": api_load, "/api/import": api_import, "/api/reveal": api_reveal,
+        "/api/load": api_load, "/api/copy": api_copy, "/api/reveal": api_reveal,
         "/api/delete": api_delete, "/api/root": api_root}
 
 

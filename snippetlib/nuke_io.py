@@ -81,9 +81,9 @@ def _parent_of(nodes):
         return nuke.root()
 
 
-def save_nodes(title, description="", tags=None, context="comp", name=None):
+def save_nodes(title, description="", tags=None, context="comp", name=None, root=None):
     """Saves the current selection."""
-    info = core.new_snippet("nuke", context, title, name=name)
+    info = core.new_snippet("nuke", context, title, name=name, root=root)
     try:
         # nodeCopy / nodePaste choke on non-ASCII paths (e.g. a Japanese title), so
         # Nuke only ever sees an ASCII file name; python does the final rename.
@@ -115,7 +115,7 @@ def save_selected_dialog():
     if not values:
         return
     info = save_nodes(values["title"], values["description"], values["tags"],
-                      values["context"] or "comp", name=values["name"])
+                      values["context"] or "comp", name=values["name"], root=values["root"])
     nuke.tprint("Snippet Library: saved %s" % info["dir"])
 
 

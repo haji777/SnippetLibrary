@@ -289,7 +289,7 @@ async function showDetail(lib, rel) {
       meta.app === "nuke" ? h("button", { class: "btn", title: "クリップボードにコピーして Nuke に Ctrl+V", text: "Copy .nk", onclick: copyNk }) : null,
       h("button", { class: "btn", text: "Copy path", onclick: () => copyText(data.payload, "パスをコピーしました") }),
       h("button", { class: "btn", text: "Open folder", onclick: () => api("/api/reveal", { lib, rel }).catch(e => toast(e.message, "error")) }),
-      library(lib).primary ? null : h("button", { class: "btn", title: "このプロジェクトのライブラリへコピー", text: "Import ⇣", onclick: importHere }),
+      copyToBox(),
       h("button", { class: "btn danger", title: "削除（_trash フォルダへ移動）", text: "🗑", onclick: confirmDelete }),
       loadBox);
     drawLoad(loadBox);
@@ -380,12 +380,20 @@ async function showDetail(lib, rel) {
     } catch (err) { toast(err.message, "error"); }
   }
 
-  async function importHere() {
-    try {
-      const res = await api("/api/import", { lib, rel });
-      toast("このライブラリにコピーしました", "ok");
-      location.hash = `#/s/${res.lib}/${encodeURI(res.rel)}`;
-    } catch (err) { toast(err.message, "error"); }
+  // ---- copy this snippet into another library (the copy is yours; author/origin are kept)
+  function copyToBox() {
+    const targets = S.state.libraries.filter(l => l.id !== lib && !l.missing);
+    if (!targets.length) return null;
+    const sel = h("select", { title: "コピー先のライブラリ" }, targets.map(l =>
+      h("option", { value: l.id, text: (l.primary ? "" : "🔗 ") + l.name })));
+    const btn = h("button", { class: "btn", title: "このスニペットを別のライブラリにコピー（元は残ります）", text: "Copy to →", onclick: async () => {
+      try {
+        const res = await api("/api/copy", { lib, rel, to: Number(sel.value) });
+        toast(`「${res.name}」にコピーしました`, "ok");
+        location.hash = `#/s/${res.lib}/${encodeURI(res.rel)}`;
+      } catch (err) { toast(err.message, "error"); }
+    } });
+    return h("span", { class: "copybox" }, btn, sel);
   }
 
   // ---- description / tags editor
@@ -538,6 +546,16 @@ function openSettings() {
   drawLibs();
   const linkPath = h("input", { type: "text", placeholder: "P:\\OtherProject\\snippetLibrary" });
   const linkName = h("input", { type: "text", placeholder: "表示名（省略可）", class: "short" });
+  const newPath = h("input", { type: "text", placeholder: "P:\\Studio\\SharedSnippets" });
+  const newName = h("input", { type: "text", placeholder: "名前（例: Shared）", class: "short" });
+  const createLib = async () => {
+    try {
+      await api("/api/links", { action: "create", path: newPath.value, name: newName.value });
+      newPath.value = ""; newName.value = "";
+      await refreshState(); drawLibs();
+      toast("ライブラリを作成してリンクしました", "ok");
+    } catch (err) { toast(err.message, "error"); }
+  };
   const libName = h("input", { type: "text", value: st.libraries[0].name, class: "short" });
   const rootPath = h("input", { type: "text", value: st.root, disabled: st.root_source === "env", placeholder: st.default_root });
   const changeRoot = async create => {
@@ -574,7 +592,9 @@ function openSettings() {
         try { await api("/api/links", { action: "library", name: libName.value }); await refreshState(); drawLibs(); } catch (err) { toast(err.message, "error"); }
       } })),
       libs,
-      h("label", { text: "他プロジェクトのライブラリをリンク" }),
+      h("label", { text: "新しいライブラリを作成（共有用など。作成後、自動でリンクされます）" }),
+      h("div", { class: "linkadd" }, newPath, newName, h("button", { class: "btn", text: "作成", onclick: createLib })),
+      h("label", { text: "既存のライブラリをリンク" }),
       h("div", { class: "linkadd" }, linkPath, linkName, h("button", { class: "btn", text: "リンク追加", onclick: async () => {
         try { await api("/api/links", { action: "add", path: linkPath.value, name: linkName.value }); linkPath.value = ""; linkName.value = ""; await refreshState(); drawLibs(); toast("リンクしました", "ok"); }
         catch (err) { toast(err.message, "error"); }

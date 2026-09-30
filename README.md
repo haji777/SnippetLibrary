@@ -53,6 +53,12 @@ frontmatter は Obsidian のプロパティとしても読めます（ライブ�
 複数プロジェクトを切り替える運用なら、プロジェクトのランチャー bat で `SNIPPETLIB_ROOT` を設定してください（環境変数がある間は ⚙ からは変更できません）。
 ライブラリはコードのフォルダとは別の場所に置いてください（例: `D:\Projects\Snippets`）。
 
+### 複数ライブラリ（個人用 / 共有用 など）
+- ⚙ → **新しいライブラリを作成**: 空のフォルダにライブラリを作り、自動でリンクします（例: 共有ドライブ上の `Shared`）
+- ⚙ → **既存のライブラリをリンク**: 他プロジェクトのライブラリを一覧に混ぜて表示
+- DCC の保存ダイアログの **Library** で保存先（自分のライブラリ or リンク済みライブラリ）を選べます
+- スニペット詳細の **Copy to →** で別のライブラリへコピー（元は残り、コピーの `.md` に `origin` / `author` が記録されます）
+
 ### Houdini
 `houdini/packages/snippetlibrary.json` を `Documents/houdini22.0/packages/` にコピーし、中の `SNIPPETLIB_REPO` をこのリポジトリの場所に書き換え。
 - メニューバー **SnippetLibrary**（Save / Load / Open Viewer）

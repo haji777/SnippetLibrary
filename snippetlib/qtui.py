@@ -52,9 +52,17 @@ class SaveDialog(QtWidgets.QDialog):
         self.description = QtWidgets.QPlainTextEdit()
         self.description.setPlaceholderText("簡単な説明 / コメント")
         self.description.setMinimumHeight(110)
-        root = QtWidgets.QLabel(core.library_root())
-        root.setStyleSheet("color: gray;")
-        root.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self.library = QtWidgets.QComboBox()
+        for lib in core.get_libraries():
+            if not lib.get("missing"):
+                self.library.addItem(("%s" if lib["primary"] else "🔗 %s") % lib["name"], lib["path"])
+        self.library.setToolTip("保存先のライブラリ（ビューアーの ⚙ でリンク / 作成したものが選べます）")
+        self.libpath = QtWidgets.QLabel()
+        self.libpath.setStyleSheet("color: gray;")
+        self.libpath.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self.library.currentIndexChanged.connect(
+            lambda _i: self.libpath.setText(self.library.currentData() or ""))
+        self.libpath.setText(self.library.currentData() or "")
 
         form = QtWidgets.QFormLayout()
         form.addRow("Title", self.title)
@@ -63,7 +71,8 @@ class SaveDialog(QtWidgets.QDialog):
         form.addRow("Context", self.context)
         form.addRow("Tags", self.tags)
         form.addRow("Description", self.description)
-        form.addRow("Library", root)
+        form.addRow("Library", self.library)
+        form.addRow("", self.libpath)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
@@ -113,6 +122,7 @@ class SaveDialog(QtWidgets.QDialog):
     def values(self):
         return {"title": self.title.text().strip(),
                 "name": core.ascii_slug(self.name.text()),
+                "root": self.library.currentData() or core.library_root(),
                 "context": self.context.currentText().strip(),
                 "tags": [t.strip() for t in self.tags.text().split(",") if t.strip()],
                 "description": self.description.toPlainText().strip()}

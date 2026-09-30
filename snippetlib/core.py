@@ -262,9 +262,9 @@ def _library_json(root):
 
 def library_info(root):
     info = read_json(_library_json(root), {}) or {}
-    base = os.path.basename(root.rstrip("\/"))
+    base = os.path.basename(root.rstrip("\\/"))
     if base.lower() == "snippetlibrary":  # the default <project>/snippetLibrary convention
-        base = os.path.basename(os.path.dirname(root.rstrip("\/")))  # <project>/snippetLibrary
+        base = os.path.basename(os.path.dirname(root.rstrip("\\/")))
     name = info.get("name") or base or os.path.basename(root)
     return {"name": name, "color": info.get("color") or "",
             "links": info.get("links") or []}
@@ -304,6 +304,23 @@ def _update_library_json(root, mutate):
     info = read_json(path, {}) or {}
     mutate(info)
     write_json_atomic(path, info, indent=2)
+
+
+def create_library(path, name="", root=None):
+    """Make a new (e.g. shared) library folder and link it from the primary one."""
+    raw = (path or "").strip().strip('"')
+    if not raw or not os.path.isabs(raw):  # a relative name would land in the cwd
+        raise ValueError("絶対パスを入力してください")
+    path = os.path.abspath(raw)
+    drive, tail = os.path.splitdrive(path)
+    if tail in ("", os.sep, "/") or os.path.normcase(path) == os.path.normcase(repo_dir()):
+        raise ValueError("そのフォルダはライブラリにできません: %s" % path)
+    if os.path.isdir(path) and not os.path.isfile(_library_json(path)) and os.listdir(path):
+        raise ValueError("空でないフォルダです（既存ライブラリなら「リンク追加」を使ってください）: %s" % path)
+    os.makedirs(os.path.join(path, CONFIG_DIR, "profiles"), exist_ok=True)
+    set_library_info(name=name or os.path.basename(path), root=path)
+    add_link(path, name, root=root)
+    return path
 
 
 def add_link(path, name="", root=None):
@@ -563,7 +580,9 @@ def resolve_rel(root, rel):
 
 
 def import_snippet(src_root, rel, src_lib_name="", root=None, user=None):
-    """Copy a snippet from a linked library into the primary one."""
+    """Copy a snippet from one library into another (root = destination,
+    default: the primary library). The copy belongs to the current user; the
+    original author and location are kept in the .md (author / origin)."""
     src = read_snippet(src_root, rel)
     meta = src["meta"]
     info = new_snippet(meta.get("app"), meta.get("context", "misc"),
