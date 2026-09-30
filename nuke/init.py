@@ -3,30 +3,19 @@
 # Install: in ~/.nuke/init.py add
 #     nuke.pluginAddPath("C:/path/to/SnippetLibrary/nuke")
 #
-# Nuke runs this file with exec(), so __file__ may not exist here: the repo is
-# located through nuke.pluginPath() instead (this folder is on it).
+# Nuke runs this file with exec(), so __file__ may not exist here; the repo is
+# located through nuke.pluginPath() (see _bootstrap.py, loaded the same way).
 import os
-import sys
 
 import nuke
 
-
-def _snippetlib_setup():
-    candidates = []
-    try:
-        candidates.append(os.path.dirname(os.path.abspath(__file__)))
-    except NameError:
-        pass
-    candidates.extend(nuke.pluginPath())
-    for folder in candidates:
-        repo = os.path.dirname(os.path.normpath(folder))
-        if os.path.isfile(os.path.join(repo, "snippetlib", "__init__.py")):
-            if repo not in sys.path:
-                sys.path.append(repo)
-            return repo
-    return None
-
-
-if _snippetlib_setup() is None:
-    nuke.tprint("SnippetLibrary: repository not found next to any plugin path: %s"
-                % ", ".join(nuke.pluginPath()))
+for _folder in nuke.pluginPath():
+    _boot = os.path.join(_folder, "_bootstrap.py")
+    if os.path.isfile(_boot):
+        _ns = {"__file__": _boot}
+        with open(_boot, "r", encoding="utf-8") as _f:
+            exec(compile(_f.read(), _boot, "exec"), _ns)
+        _ns["find_repo"](report=True)
+        break
+else:
+    nuke.tprint("SnippetLibrary: _bootstrap.py not found on the plugin path")
