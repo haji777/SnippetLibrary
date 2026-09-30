@@ -1,0 +1,18 @@
+# python
+__pycache__/
+*.pyc
+*.tmp
+
+# the snippet data itself lives per project, not in this repo
+# (remove this line if you want to publish the sample snippets too)
+snippetLibrary/
+
+# editor / os
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# library data that may land next to the code by mistake
+_config/
+_trash/

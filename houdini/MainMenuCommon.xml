@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mainMenu>
+  <menuBar>
+    <subMenu id="snippetlib_menu">
+      <label>SnippetLibrary</label>
+      <insertBefore>help_menu</insertBefore>
+      <scriptItem id="h.snippetlib_save">
+        <label>Save Selection to Library...</label>
+        <scriptCode><![CDATA[import snippetlib.houdini_io as m
+m.save_selected_dialog()]]></scriptCode>
+      </scriptItem>
+      <scriptItem id="h.snippetlib_browse">
+        <label>Load from Library...</label>
+        <scriptCode><![CDATA[import snippetlib.houdini_io as m
+m.show_browser()]]></scriptCode>
+      </scriptItem>
+      <separatorItem/>
+      <scriptItem id="h.snippetlib_viewer">
+        <label>Open Viewer</label>
+        <scriptCode><![CDATA[import snippetlib.houdini_io as m
+m.open_viewer()]]></scriptCode>
+      </scriptItem>
+    </subMenu>
+  </menuBar>
+</mainMenu>

@@ -1,0 +1,6 @@
+{
+    "env": [
+        {"SNIPPETLIB_REPO": "C:/path/to/SnippetLibrary"}
+    ],
+    "path": "$SNIPPETLIB_REPO/houdini"
+}
