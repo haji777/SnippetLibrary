@@ -53,16 +53,71 @@ def api_state(_q):
             "logos": app_logos()}
 
 
+LOGO_EXTS = ("svg", "png", "webp", "jpg")
+LOGO_CACHE = core.local_dir("logos")  # logos picked up from installed DCCs (this machine only)
+
+
 def app_logos():
-    """viewer/static/logos/<app>.(svg|png|webp|jpg) -> {app: file}. Not shipped:
-    the Houdini / Nuke marks are trademarks, users drop their own copies in."""
+    """{app: file} served under /logos/. Order: a file the user put in
+    viewer/static/logos/, then one found in an installed Houdini / Nuke (copied
+    once to %LOCALAPPDATA%), else nothing (text badge). Not shipped with the
+    repo: the marks are trademarks of SideFX / Foundry."""
     out = {}
-    for ext in ("svg", "png", "webp", "jpg"):
-        for app in core.APPS:
-            fn = "%s.%s" % (app, ext)
-            if app not in out and os.path.isfile(os.path.join(STATIC, "logos", fn)):
+    for app in core.APPS:
+        for folder in (os.path.join(STATIC, "logos"), LOGO_CACHE):
+            for ext in LOGO_EXTS:
+                fn = "%s.%s" % (app, ext)
+                if os.path.isfile(os.path.join(folder, fn)):
+                    out.setdefault(app, fn)
+        if app not in out:
+            fn = _logo_from_install(app)
+            if fn:
                 out[app] = fn
     return out
+
+
+def _newest(pattern):
+    """Highest version among install folders matching the glob."""
+    import glob
+    import re
+
+    def key(p):
+        return [int(x) for x in re.findall(r"\d+", os.path.basename(os.path.dirname(p)) or p)]
+    hits = glob.glob(pattern)
+    return max(hits, key=key) if hits else None
+
+
+def _logo_from_install(app):
+    """Copy the application's own logo into LOGO_CACHE. Windows install layouts:
+      Houdini: <HFS>/houdini/config/Icons/icons.zip -> MISC/logo.svg
+      Nuke:    <Nuke>/plugins/icons/NukeApp128.png"""
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    try:
+        if app == "houdini":
+            hfs = os.environ.get("HFS")
+            zips = [os.path.join(hfs, "houdini", "config", "Icons", "icons.zip")] if hfs else []
+            found = _newest(os.path.join(pf, "Side Effects Software", "Houdini *", "houdini",
+                                         "config", "Icons", "icons.zip"))
+            if found:
+                zips.append(found)
+            import zipfile
+            for z in zips:
+                if os.path.isfile(z):
+                    with zipfile.ZipFile(z) as zf:
+                        data = zf.read("MISC/logo.svg")
+                    dest = os.path.join(LOGO_CACHE, "houdini.svg")
+                    with open(dest, "wb") as f:
+                        f.write(data)
+                    return "houdini.svg"
+        elif app == "nuke":
+            found = _newest(os.path.join(pf, "Nuke*", "plugins", "icons", "NukeApp128.png"))
+            if found:
+                import shutil
+                shutil.copyfile(found, os.path.join(LOGO_CACHE, "nuke.png"))
+                return "nuke.png"
+    except Exception:
+        pass
+    return None
 
 
 def api_snippets(_q):
@@ -211,7 +266,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._run(GET[url.path], {k: v[0] for k, v in parse_qs(url.query).items()})
         name = "index.html" if url.path in ("/", "") else url.path.lstrip("/")
         path = os.path.abspath(os.path.join(STATIC, name))
-        if not path.startswith(STATIC) or not os.path.isfile(path):
+        if name.startswith("logos/") and not os.path.isfile(path):  # auto-detected DCC logo
+            path = os.path.abspath(os.path.join(LOGO_CACHE, os.path.basename(name)))
+            if not path.startswith(LOGO_CACHE) or not os.path.isfile(path):
+                return self._send(404, {"error": "not found"})
+        elif not path.startswith(STATIC) or not os.path.isfile(path):
             return self._send(404, {"error": "not found"})
         with open(path, "rb") as f:
             ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"

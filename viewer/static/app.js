@@ -79,10 +79,13 @@ function userChip(user, extra) {
     h("i", { class: "avatar", text: (p.display || user).slice(0, 1).toUpperCase() }), p.display);
 }
 
-function appBadge(app) {
+function appBadge(app, withLabel) {
   const a = APP_INFO[app] || { label: app, color: "#888" };
-  const logo = (S.state.logos || {})[app];  // viewer/static/logos/<app>.png|svg, if the user put one there
-  if (logo) return h("img", { class: "applogo", src: "logos/" + logo, alt: a.label, title: a.label });
+  const logo = (S.state.logos || {})[app];  // viewer/static/logos/, or picked up from an installed DCC
+  if (logo) {
+    const img = h("img", { class: "applogo", src: "logos/" + logo, alt: a.label, title: a.label });
+    return withLabel ? h("span", { class: "applogo-l" }, img, a.label) : img;
+  }
   return h("span", { class: "badge app", style: { "--c": a.color }, text: a.label });
 }
 
@@ -169,7 +172,7 @@ function drawFilters(side, redraw) {
   put(side, 
     h("button", { class: "crownfilter" + (F.crown ? " on" : ""), onclick: () => { F.crown = !F.crown; redraw(); } },
       crownSvg(), "殿堂入りのみ", h("em", { text: S.snippets.filter(s => s.crown).length })),
-    group("Software", "app", "apps", v => appBadge(v)),
+    group("Software", "app", "apps", v => appBadge(v, true)),
     group("User", "user", "users", v => userChip(v)),
     group("Context", "context", "contexts", v => ctxBadge(v)),
     S.state.libraries.length > 1 ? group("Library", "lib", "libs", v => libBadge(v)) : null,
