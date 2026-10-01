@@ -542,6 +542,14 @@ def read_snippet(root, rel):
                                                    meta.get("context", ""))
         except Exception:
             graph = None
+    elif graph and payload.lower().endswith(".json") and os.path.isfile(payload):
+        # snippets saved before editable networks (e.g. LOP sopmodify) were
+        # supported: fill the missing insides from the payload, in memory only
+        from . import graph as graphmod
+        try:
+            graphmod.fill_missing_networks(graph.get("network"), read_json(payload, {}))
+        except Exception:
+            pass
     return {"meta": meta, "description": get_description(body), "graph": graph,
             "dir": sdir, "md": md, "payload": payload}
 

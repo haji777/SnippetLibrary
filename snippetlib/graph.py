@@ -72,9 +72,9 @@ def _h_network(items):
             "params": [{"name": k, "label": "", "value": v}
                        for k, v in (d.get("parms") or {}).items()],
             "ext_inputs": [], "network": None}
-        children = d.get("children")
-        if isinstance(children, dict) and children:
-            node["network"] = _h_network(children)
+        sub, sub_path = _h_contents(d)
+        if sub:
+            node["network"], node["net_path"] = sub, sub_path
         for inp in d.get("inputs") or []:
             src = inp.get("from")
             if src is None:
@@ -86,6 +86,55 @@ def _h_network(items):
                 node["ext_inputs"].append({"dst_in": inp.get("to_index", 0), "from": src})
         net["nodes"].append(node)
     return net
+
+
+def _h_contents(d):
+    """-> (network, relative path of that network inside the node) or (None, "").
+
+    Subnets keep their nodes in "children". Locked assets with an editable dive
+    target (e.g. the SOP network of a LOP "sopmodify") keep them in
+    "editables": {"modify/modify": {"children": {...}}} instead."""
+    children = d.get("children")
+    if isinstance(children, dict) and children:
+        return _h_network(children), ""
+    editables = d.get("editables")
+    if not isinstance(editables, dict):
+        return None, ""
+    nets = [(path, e["children"]) for path, e in editables.items()
+            if isinstance(e, dict) and isinstance(e.get("children"), dict) and e["children"]]
+    if len(nets) == 1:
+        return _h_network(nets[0][1]), nets[0][0]
+    if not nets:
+        return None, ""
+    net = _empty_net()  # several dive targets: one container node for each
+    for i, (path, kids) in enumerate(nets):
+        net["nodes"].append({
+            "name": path, "type": "subnet", "type_label": "editable network", "kind": "node",
+            "x": i * 2.5 * H_SCALE, "y": 0, "w": H_NODE_W * H_SCALE, "h": H_NODE_H * H_SCALE,
+            "color": None, "label": "", "flags": {}, "params": [], "ext_inputs": [],
+            "network": _h_network(kids), "net_path": ""})
+    return net, ""
+
+
+def fill_missing_networks(net, items):
+    """graph.json files written before editable networks were supported lack the
+    inside of nodes like "sopmodify": add it from the payload. Returns True if
+    anything was added."""
+    changed = False
+    if not isinstance(items, dict):
+        return changed
+    for node in (net or {}).get("nodes", []):
+        d = items.get(node.get("name"))
+        if not isinstance(d, dict):
+            continue
+        if node.get("network") is None:
+            sub, sub_path = _h_contents(d)
+            if sub:
+                node["network"], node["net_path"] = sub, sub_path
+                changed = True
+        elif isinstance(d.get("children"), dict):
+            changed = fill_missing_networks(node["network"], d["children"]) or changed
+    return changed
 
 
 H_HORIZONTAL = ("cop", "vop")  # left-to-right networks with named ports

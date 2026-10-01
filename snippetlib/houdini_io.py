@@ -74,7 +74,10 @@ def _enrich(net, parent):
         except hou.Error:
             pass
         if node.get("network"):
-            _enrich(node["network"], live)
+            # editable network inside a locked asset (e.g. sopmodify -> "modify/modify")
+            inner = live.node(node["net_path"]) if node.get("net_path") else live
+            if inner is not None:
+                _enrich(node["network"], inner)
 
 
 def save_items(items, title, description="", tags=None, context=None, name=None, root=None):
