@@ -74,7 +74,7 @@ nuke.pluginAddPath("C:/path/to/SnippetLibrary/nuke")  # このリポジトリの
 - スニペット詳細の **Copy to →** で別のライブラリへコピー（元は残り、コピーの `.md` に `origin` / `author` が記録されます）
 
 ## ビューアー → DCC へのロードの仕組み
-ソケットは使わずファイルベース。DCC 側が QTimer（メインスレッド）で 0.7 秒毎にローカルの inbox を監視します。
+ソケットは使わずファイルベース。DCC 側が QTimer（メインスレッド）で 1.5 秒毎にローカルの inbox を監視します（生存通知の書き込みは 10 秒毎）。
 
 ```
 %LOCALAPPDATA%\SnippetLibrary\sessions\<app>_<pid>.json     起動中セッション（heartbeat, シーン名, バージョン）

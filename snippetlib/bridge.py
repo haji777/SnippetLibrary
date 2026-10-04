@@ -16,9 +16,9 @@ import time
 
 from . import core
 
-HEARTBEAT_SEC = 4.0
-ALIVE_SEC = 15.0
-POLL_MS = 700
+HEARTBEAT_SEC = 10.0
+ALIVE_SEC = 30.0
+POLL_MS = 1500
 
 _state = {"timer": None}
 
