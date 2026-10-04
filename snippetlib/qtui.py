@@ -18,6 +18,22 @@ def _exec(dialog):
     return dialog.exec() if hasattr(dialog, "exec") else dialog.exec_()
 
 
+class _HintedTextEdit(QtWidgets.QPlainTextEdit):
+    """QPlainTextEdit keeps its placeholder while only IME preedit text exists
+    (the document is still empty), so Japanese input is drawn on top of the
+    hint. Hide the hint for as long as something is being composed."""
+
+    def __init__(self, hint, parent=None):
+        super(_HintedTextEdit, self).__init__(parent)
+        self._hint = hint
+        self.setPlaceholderText(hint)
+
+    def inputMethodEvent(self, event):
+        self.setPlaceholderText("" if event.preeditString() else self._hint)
+        super(_HintedTextEdit, self).inputMethodEvent(event)
+        self.viewport().update()
+
+
 class SaveDialog(QtWidgets.QDialog):
     """Title + short description (+ context / tags) for a new snippet."""
 
@@ -49,8 +65,7 @@ class SaveDialog(QtWidgets.QDialog):
         self.context.setEnabled(bool(contexts))
         self.tags = QtWidgets.QLineEdit()
         self.tags.setPlaceholderText("tag1, tag2 ...")
-        self.description = QtWidgets.QPlainTextEdit()
-        self.description.setPlaceholderText("簡単な説明 / コメント")
+        self.description = _HintedTextEdit("簡単な説明 / コメント")
         self.description.setMinimumHeight(110)
         self.library = QtWidgets.QComboBox()
         for lib in core.get_libraries():
