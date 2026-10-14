@@ -11,7 +11,8 @@ rem set SNIPPETLIB_USER=someone
 rem set SNIPPETLIB_LINKS=P:\OtherProject\snippetLibrary;P:\Studio\snippetLibrary
 
 setlocal
-cd /d "%~dp0"
+rem pushd also works from a UNC path (a network share without a drive letter), where "cd /d" fails
+pushd "%~dp0" || (echo Cannot access %~dp0 & pause & exit /b 1)
 rem the viewer only needs the standard library: never inherit a DCC python env
 set PYTHONHOME=
 set PYTHONPATH=
@@ -37,3 +38,4 @@ exit /b 1
 :run
 %PY% viewer\server.py %*
 if errorlevel 1 pause
+popd
