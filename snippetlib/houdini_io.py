@@ -163,7 +163,7 @@ def load(payload_path, meta=None):
             offset = hou.Vector2(0, 0) - _data_center(data)
         else:  # drop the block in the middle of what the user is looking at
             offset = editor.visibleBounds().center() - _data_center(data)
-        created = hou.data.createItemsFromData(target, data, offset_position=offset)
+        created = _create_items(target, data, offset)
     hou.clearAllSelected()
     top = [i for i in created.values() if i.parent() == target]
     for item in top:
@@ -176,6 +176,19 @@ def load(payload_path, meta=None):
         message += "  (保存時 Houdini %s / 現在 %s)" % (saved_in, hou.applicationVersionString())
     hou.ui.setStatusMessage("Snippet Library: loaded " + message)
     return message
+
+
+def _create_items(target, data, offset):
+    """createItemsFromData with cooking paused. Nodes that translate to USD while
+    they are being built (e.g. the parameter VOPs inside an Edit Material LOP)
+    otherwise cook half-configured and pop "Error while translating a USD
+    shader" dialogs; the finished nodes are fine, the dialogs are just noise."""
+    old = hou.updateModeSetting()
+    hou.setUpdateMode(hou.updateMode.Manual)
+    try:
+        return hou.data.createItemsFromData(target, data, offset_position=offset)
+    finally:
+        hou.setUpdateMode(old)
 
 
 def _data_center(data):
