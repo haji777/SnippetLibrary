@@ -84,6 +84,10 @@ def save_items(items, title, description="", tags=None, context=None, name=None,
     parent = items[0].parent()
     context = context or context_of(parent)
     data = hou.data.itemsAsData(items, anchor_position=_anchor(items))
+    try:
+        _record_shader_language(data, parent)
+    except Exception:
+        pass  # worst case: the loader guesses MaterialX from the node types
     info = core.new_snippet("houdini", context, title, name=name, root=root)
     try:
         core.write_json_atomic(info["payload"], data)
@@ -178,17 +182,90 @@ def load(payload_path, meta=None):
     return message
 
 
+SHADER_LANG_KEY = "snippetlib_shader_language"
+
+
+def _record_shader_language(data, parent):
+    """hou.data does not capture a VOP node's shader language (MaterialX / VEX /
+    OSL ...). A VOP subnet's connector storage types depend on it (a MaterialX
+    string parameter is a uniform "ustring"), so remember it in user_data."""
+    for name, d in data.items():
+        if not isinstance(d, dict):
+            continue
+        live = parent.node(name)
+        if live is None:
+            continue
+        if isinstance(live, hou.VopNode):
+            try:
+                lang = live.shaderLanguageName()
+            except hou.Error:
+                lang = ""
+            if lang and lang != "VEX":
+                d.setdefault("user_data", {})[SHADER_LANG_KEY] = lang
+        if isinstance(d.get("children"), dict):
+            _record_shader_language(d["children"], live)
+        for path, e in (d.get("editables") or {}).items():
+            inner = live.node(path)
+            if inner is not None and isinstance(e.get("children"), dict):
+                _record_shader_language(e["children"], inner)
+
+
+def _guess_shader_language(children):
+    """Snippets saved before the language was recorded: MaterialX if the subnet
+    holds mtlx* nodes."""
+    if any(isinstance(c, dict) and str(c.get("type", "")).startswith("mtlx") for c in children.values()):
+        return "MaterialX"
+    return None
+
+
 def _create_items(target, data, offset):
-    """createItemsFromData with cooking paused. Nodes that translate to USD while
-    they are being built (e.g. the parameter VOPs inside an Edit Material LOP)
-    otherwise cook half-configured and pop "Error while translating a USD
-    shader" dialogs; the finished nodes are fine, the dialogs are just noise."""
+    """createItemsFromData with cooking paused, and in two passes per level.
+
+    Paused: nodes that translate to USD while being built (the parameter VOPs
+    inside an Edit Material LOP) otherwise cook half-configured and pop "Error
+    while translating a USD shader" dialogs.
+
+    Two passes: a node is created without its children, its shader language is
+    restored, and only then are the children created. Connector storage types
+    (uniform / varying) are decided when a connection is made, so a MaterialX
+    subnet rebuilt in one go ends up with varying strings and "Input storage
+    type (uniform/varying) does not match input 'file'" on every mtlximage."""
     old = hou.updateModeSetting()
     hou.setUpdateMode(hou.updateMode.Manual)
     try:
-        return hou.data.createItemsFromData(target, data, offset_position=offset)
+        return _create_level(target, data, offset, clear=False)
     finally:
         hou.setUpdateMode(old)
+
+
+def _create_level(parent, data, offset, clear):
+    shallow = {}
+    for name, d in data.items():
+        if isinstance(d, dict) and isinstance(d.get("children"), dict):
+            d = dict(d)
+            d.pop("children")
+        shallow[name] = d
+    made = hou.data.createItemsFromData(parent, shallow, offset_position=offset, clear_content=clear)
+    for name, item in list(made.items()):
+        d = data.get(name)
+        if not isinstance(item, hou.Node) or not isinstance(d, dict):
+            continue
+        children = d.get("children") if isinstance(d.get("children"), dict) else None
+        if isinstance(item, hou.VopNode):
+            lang = (d.get("user_data") or {}).get(SHADER_LANG_KEY)
+            if not lang and children:
+                lang = _guess_shader_language(children)
+            if lang:
+                try:
+                    item.setShaderLanguageName(lang)
+                except hou.Error:
+                    pass
+            if SHADER_LANG_KEY in item.userDataDict():
+                item.destroyUserData(SHADER_LANG_KEY)
+        if children:
+            sub = _create_level(item, children, hou.Vector2(0, 0), clear=True)
+            made.update({name + "/" + k: v for k, v in sub.items()})
+    return made
 
 
 def _data_center(data):

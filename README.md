@@ -158,3 +158,13 @@ frontmatter は Obsidian のプロパティとしても読めます（ライブ�
 - **コードの置き場は管理者のみ書き込み可**にしてください。そこにあるコードは全員の Houdini / Nuke の中で実行されます
 - スニペットのデータ（ライブラリ）は別フォルダに置き、使う全員に書き込み権限が必要です（保存・コメント・殿堂入り・ごみ箱移動はすべて書き込み）
 - 他人のスニペットを読み込むことは、他人の `.hip` / `.nk` を開くのと同じです。Python を含むノードはその場で実行されます
+
+## 調査用ツール: ノードの比較
+ロードしたスニペットが元と違う気がするときに、2つのネットワークを再帰的に比べて差分だけを表示します（Houdini の Python Shell で）。
+```python
+import sys; sys.path.append("C:/path/to/SnippetLibrary/tools")
+import compare_nodes
+compare_nodes.compare("/stage/editmaterial1", "/stage/editmaterial7")   # 差分を表示
+compare_nodes.dump("/stage/editmaterial1", "C:/temp/editmaterial1.json")  # 1つを JSON に書き出し
+```
+比較対象: ノードタイプ、全パラメータ（値・式・既定値かどうか）、パラメータテンプレート、入力接続、VOP のコネクタ名と型、フラグ、ユーザーデータ、エラー。
