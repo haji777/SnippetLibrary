@@ -16,8 +16,33 @@ stored for each node, so "lost on save" and "lost on load" can be told apart.
 """
 
 import json
+import re
 
-import hou
+try:
+    import hou
+except ImportError:  # redact() is usable outside Houdini
+    hou = None
+
+# Paths (drive letters, UNC shares, $HIP/..., anything with 2+ separators) are
+# replaced by <path:basename> so the report can be shared without leaking
+# project locations. Pass redact=False to report() to keep them.
+_PATH_RE = re.compile(
+    r"[A-Za-z]:[\\/][^\s'\"{}\[\],]*"                       # C:\... or C:/...
+    r"|\\\\[^\s'\"{}\[\],]+"                                 # \\server\share\...
+    r"|\$[A-Z_]+[\\/][^\s'\"{}\[\],]*"                       # $HIP/...
+    r"|(?<![\w.])[^\s'\"{}\[\],\\/]*(?:[\\/][^\\/\s'\"{}\[\],]+){2,}[\\/]?")  # a/b/c (2+ separators)
+_NODE_ROOTS = ("/obj", "/stage", "/mat", "/out", "/ch", "/shop", "/img", "/tasks", "/cop", "/vex")
+
+
+def redact(text):
+    def sub(m):
+        s = m.group(0)
+        # node paths are not file paths (also "op:_auto_/stage/..." shader names)
+        if s.startswith(_NODE_ROOTS) or any(r + "/" in s for r in ("/obj", "/stage", "/mat", "/out", "/ch", "/shop", "/tasks")):
+            return s
+        base = re.split(r"[\\/]", s)[-1]
+        return "<path:%s>" % base if base else "<path>"
+    return _PATH_RE.sub(sub, text)
 
 
 def _node_lines(node, saved):
@@ -75,7 +100,7 @@ def _find_saved(payload, rel):
     return node
 
 
-def report(path_a, path_b, payload=None, out_file=None):
+def report(path_a, path_b, payload=None, out_file=None, redact_paths=True):
     data = None
     if payload:
         with open(payload, "r", encoding="utf-8") as f:
@@ -103,6 +128,8 @@ def report(path_a, path_b, payload=None, out_file=None):
                         break
             lines.extend(_node_lines(node, saved if data else None))
     text = "\n".join(lines)
+    if redact_paths:
+        text = redact(text)
     print(text)
     if out_file:
         with open(out_file, "w", encoding="utf-8") as f:

@@ -153,8 +153,9 @@ def _short(value, limit=300):
     return text if len(text) <= limit else text[:limit] + "..."
 
 
-def compare(path_a, path_b, show_same=False):
-    """Print the differences between two networks. Returns the list of lines."""
+def compare(path_a, path_b, show_same=False, redact_paths=True):
+    """Print the differences between two networks. Returns the list of lines.
+    File paths inside values are masked as <path:basename> unless redact_paths=False."""
     tree_a, tree_b = describe_tree(path_a), describe_tree(path_b)
     lines = []
     for rel in sorted(set(tree_a) | set(tree_b)):
@@ -174,6 +175,10 @@ def compare(path_a, path_b, show_same=False):
             lines.append("[%s] identical" % label)
     header = "A = %s\nB = %s\n%s" % (path_a, path_b, "=" * 60)
     text = header + "\n" + ("\n".join(lines) if lines else "no differences found")
+    if redact_paths:
+        from diag_vop_storage import redact
+        text = redact(text)
+        lines = [redact(l) for l in lines]
     print(text)
     return lines
 

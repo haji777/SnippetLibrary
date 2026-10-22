@@ -200,7 +200,7 @@ def _record_shader_language(data, parent):
                 lang = live.shaderLanguageName()
             except hou.Error:
                 lang = ""
-            if lang and lang != "VEX":
+            if lang:  # VEX too: inside a MaterialX subnet a VEX parameter must stay varying
                 d.setdefault("user_data", {})[SHADER_LANG_KEY] = lang
         if isinstance(d.get("children"), dict):
             _record_shader_language(d["children"], live)
@@ -211,61 +211,105 @@ def _record_shader_language(data, parent):
 
 
 def _guess_shader_language(children):
-    """Snippets saved before the language was recorded: MaterialX if the subnet
-    holds mtlx* nodes."""
+    """Snippets saved before languages were recorded at all: MaterialX if the
+    subnet holds mtlx* nodes. Never used when the payload carries records."""
     if any(isinstance(c, dict) and str(c.get("type", "")).startswith("mtlx") for c in children.values()):
         return "MaterialX"
     return None
 
 
+def _has_language_records(data):
+    for d in data.values():
+        if not isinstance(d, dict):
+            continue
+        if SHADER_LANG_KEY in (d.get("user_data") or {}):
+            return True
+        if isinstance(d.get("children"), dict) and _has_language_records(d["children"]):
+            return True
+    return False
+
+
 def _create_items(target, data, offset):
-    """createItemsFromData with cooking paused, and in two passes per level.
+    """createItemsFromData with cooking paused, built level by level:
+    nodes (no children, no wires) -> shader languages -> wires -> children.
 
     Paused: nodes that translate to USD while being built (the parameter VOPs
     inside an Edit Material LOP) otherwise cook half-configured and pop "Error
     while translating a USD shader" dialogs.
 
-    Two passes: a node is created without its children, its shader language is
-    restored, and only then are the children created. Connector storage types
-    (uniform / varying) are decided when a connection is made, so a MaterialX
-    subnet rebuilt in one go ends up with varying strings and "Input storage
-    type (uniform/varying) does not match input 'file'" on every mtlximage."""
+    Languages before wires: a VOP connector's storage (uniform / varying) is
+    decided from the node's shader language when the wire is made and never
+    recomputed, so a MaterialX parameter wired while still VEX stays varying
+    ("Input storage type (uniform/varying) does not match input 'file'" on
+    every mtlximage) and a VEX parameter wired as MaterialX becomes uniform.
+    Languages are per node, not per subnet: a VEX subnet made by Edit Material
+    holds MaterialX parameters next to VEX ones."""
     old = hou.updateModeSetting()
     hou.setUpdateMode(hou.updateMode.Manual)
     try:
-        return _create_level(target, data, offset, clear=False)
+        return _create_level(target, data, offset, clear=False, guess=not _has_language_records(data))
     finally:
         hou.setUpdateMode(old)
 
 
-def _create_level(parent, data, offset, clear):
-    shallow = {}
+def _create_level(parent, data, offset, clear, guess):
+    shallow, wires = {}, []
     for name, d in data.items():
-        if isinstance(d, dict) and isinstance(d.get("children"), dict):
+        if isinstance(d, dict):
             d = dict(d)
-            d.pop("children")
+            d.pop("children", None)
+            for w in d.pop("inputs", None) or []:
+                wires.append((name, w))
         shallow[name] = d
     made = hou.data.createItemsFromData(parent, shallow, offset_position=offset, clear_content=clear)
     for name, item in list(made.items()):
         d = data.get(name)
-        if not isinstance(item, hou.Node) or not isinstance(d, dict):
+        if not isinstance(item, hou.VopNode) or not isinstance(d, dict):
             continue
-        children = d.get("children") if isinstance(d.get("children"), dict) else None
-        if isinstance(item, hou.VopNode):
-            lang = (d.get("user_data") or {}).get(SHADER_LANG_KEY)
-            if not lang and children:
-                lang = _guess_shader_language(children)
-            if lang:
-                try:
-                    item.setShaderLanguageName(lang)
-                except hou.Error:
-                    pass
-            if SHADER_LANG_KEY in item.userDataDict():
-                item.destroyUserData(SHADER_LANG_KEY)
-        if children:
-            sub = _create_level(item, children, hou.Vector2(0, 0), clear=True)
+        lang = (d.get("user_data") or {}).get(SHADER_LANG_KEY)
+        if not lang and guess and isinstance(d.get("children"), dict):
+            lang = _guess_shader_language(d["children"])
+        if lang:
+            try:
+                item.setShaderLanguageName(lang)
+            except hou.Error:
+                pass
+        if SHADER_LANG_KEY in item.userDataDict():
+            item.destroyUserData(SHADER_LANG_KEY)
+    for name, w in wires:
+        _wire(parent, made, name, w)
+    for name, item in list(made.items()):
+        d = data.get(name)
+        if isinstance(item, hou.Node) and isinstance(d, dict) and isinstance(d.get("children"), dict) and d["children"]:
+            sub = _create_level(item, d["children"], hou.Vector2(0, 0), clear=True, guess=guess)
             made.update({name + "/" + k: v for k, v in sub.items()})
     return made
+
+
+def _wire(parent, made, name, w):
+    """Recreate one input connection from hou.data's {"from", "from_index", "to_index"}.
+    Indices are ints, or connector names in COP / VOP networks. A source that is
+    not part of the snippet is looked up by name in the parent, like
+    createItemsFromData(external_connections=True) does."""
+    dst = made.get(name)
+    src = made.get(w.get("from"))
+    if src is None and w.get("from"):
+        src = parent.item(w["from"]) if hasattr(parent, "item") else parent.node(w["from"])
+    if dst is None or src is None or not isinstance(dst, hou.Node):
+        return
+    fi, ti = w.get("from_index", 0), w.get("to_index", 0)
+    try:
+        if isinstance(ti, str) or isinstance(fi, str):
+            in_name = ti if isinstance(ti, str) else dst.inputNames()[ti]
+            if isinstance(src, hou.Node):
+                out_name = fi if isinstance(fi, str) else src.outputNames()[fi]
+                dst.setNamedInput(in_name, src, out_name)
+            else:  # dots / indirect inputs have a single, unnamed output
+                dst.setInput(dst.inputNames().index(in_name), src, 0)
+        else:
+            dst.setInput(ti, src, fi)
+    except (hou.Error, ValueError, IndexError) as exc:
+        print("SnippetLibrary: could not wire %s[%s] <- %s[%s]: %s" % (name, ti, w.get("from"), fi, exc))
 
 
 def _data_center(data):
