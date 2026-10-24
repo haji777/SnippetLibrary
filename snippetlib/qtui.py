@@ -108,6 +108,7 @@ class SaveDialog(QtWidgets.QDialog):
             "<span style='color:%s'>&#9632;</span> %s &nbsp; %d nodes"
             % (APP_COLORS.get(app, "#888"), app, profile["color"], profile["display"], node_count))
         self.app, self.user = app, profile["user"]
+        self.supersede = prefill  # meta of the snippet this save replaces, if any
 
         self.title = _HistoryCombo(vocab["titles"], "表示タイトル（日本語OK）")
         _attach_word_completer(self.title.lineEdit(), vocab["words"], " ")
@@ -252,7 +253,52 @@ class SaveDialog(QtWidgets.QDialog):
         if not core.ascii_slug(self.name.text()):
             self.name.setFocus()
             return
+        if self.supersede is None and not self._check_duplicate():
+            return
         self.accept()
+
+    def _check_duplicate(self):
+        """A title / file name that (almost) matches an existing snippet is most
+        likely meant as its next version: offer that. -> False to stay in the dialog."""
+        try:
+            hits = core.similar_snippets(core.get_libraries(), self.app, self.title.text(),
+                                         self.name.text(), threshold=self.SIMILARITY)
+        except Exception:
+            hits = []
+        if not hits:
+            return True
+        old = hits[0]
+        same = old["_score"] >= 1.0
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("同じ名前のスニペットがあります" if same else "似た名前のスニペットがあります")
+        box.setIcon(QtWidgets.QMessageBox.Question)
+        box.setText("「%s」 (%s / %s%s)%s" % (
+            old.get("title", ""), old.get("user", ""), (old.get("_lib") or {}).get("name", ""),
+            "" if same else "、一致率 %d%%" % round(old["_score"] * 100),
+            " と同じ名前です。" if same else " に似ています。"))
+        box.setInformativeText("このスニペットの新しいバージョンとして上書きしますか？\n"
+                               "上書きすると旧バージョンは一覧で打ち消し線表示になり、Houdini / Nuke のロード一覧からは消えます。")
+        overwrite = box.addButton("新しいバージョンとして上書き", QtWidgets.QMessageBox.AcceptRole)
+        keep = box.addButton("別のスニペットとして保存", QtWidgets.QMessageBox.DestructiveRole)
+        box.addButton("戻る", QtWidgets.QMessageBox.RejectRole)
+        box.setDefaultButton(overwrite)
+        self._exec_box(box)
+        clicked = box.clickedButton()
+        if clicked is overwrite:
+            self.supersede = old
+            # identical name -> number the new version like the Overwrite menu does
+            if core._compare_key(self.title.text()) == core._compare_key(old.get("title")):
+                self.title.setText(core.bump_version(old.get("title", ""), " "))
+            if core._compare_key(self.name.text()) == core._compare_key(old.get("name")):
+                self._name_edited = True
+                self.name.setText(core.bump_version(old.get("name", "") or core.ascii_slug(old.get("title", "")), "_"))
+            return True
+        return clicked is keep
+
+    SIMILARITY = 0.9
+
+    def _exec_box(self, box):
+        box.exec_() if hasattr(box, "exec_") else box.exec()
 
     def values(self):
         return {"title": self.title.text().strip(),
@@ -260,7 +306,8 @@ class SaveDialog(QtWidgets.QDialog):
                 "root": self.library.currentData() or core.library_root(),
                 "context": self.context.currentText().strip(),
                 "tags": [t.strip() for t in self.tags.text().split(",") if t.strip()],
-                "description": self.description.toPlainText().strip()}
+                "description": self.description.toPlainText().strip(),
+                "supersede": self.supersede}
 
 
 def ask_save(app, context, contexts=None, node_count=0, parent=None, prefill=None):

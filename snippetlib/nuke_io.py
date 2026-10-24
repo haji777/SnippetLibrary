@@ -122,6 +122,7 @@ def save_selected_dialog(supersede=None):
                            prefill=supersede)
     if not values:
         return
+    supersede = values.get("supersede") or supersede  # the dialog may have offered "new version"
     info = save_nodes(values["title"], values["description"], values["tags"],
                       values["context"] or "comp", name=values["name"], root=values["root"],
                       supersede=supersede)

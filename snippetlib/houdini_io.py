@@ -135,6 +135,7 @@ def save_selected_dialog(supersede=None):
                            hou.qt.mainWindow(), prefill=supersede)
     if not values:
         return
+    supersede = values.get("supersede") or supersede  # the dialog may have offered "new version"
     info = save_items(items, values["title"], values["description"], values["tags"],
                       name=values["name"], root=values["root"], supersede=supersede)
     hou.ui.setStatusMessage("Snippet Library: saved %s" % info["dir"])

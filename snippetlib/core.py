@@ -554,9 +554,10 @@ def read_snippet(root, rel):
             "dir": sdir, "md": md, "payload": payload}
 
 
-def naming_vocabulary(roots, app=None, limit=20):
+def naming_vocabulary(roots, app=None, limit=20, builtin=True):
     """Help the save dialog: recent titles / file names, every tag (most used
-    first) and the words they are made of, collected from the given libraries."""
+    first) and the words they are made of, collected from the given libraries.
+    builtin=True appends the bundled Houdini / Nuke / CG dictionaries."""
     titles, names, tag_count, word_count = [], [], {}, {}
     seen_t, seen_n = set(), set()
     metas = []
@@ -582,7 +583,92 @@ def naming_vocabulary(roots, app=None, limit=20):
             word_count[word] = word_count.get(word, 0) + 1
     tags = sorted(tag_count, key=lambda k: (-tag_count[k], k.lower()))
     words = sorted((w for w in word_count if len(w) > 1), key=lambda k: (-word_count[k], k.lower()))
+    if builtin:
+        # words really used in the libraries rank first, then each library's own
+        # _config/vocabulary.txt, then the bundled app / CG dictionaries
+        seen = {w.lower() for w in words}
+        extra = []
+        for root in roots:
+            extra.extend(read_word_list(os.path.join(root, CONFIG_DIR, "vocabulary.txt")))
+        extra.extend(builtin_vocabulary(app))
+        for w in extra:
+            if w.lower() not in seen:
+                seen.add(w.lower())
+                words.append(w)
     return {"titles": titles[:limit], "names": names[:limit], "tags": tags, "words": words}
+
+
+VOCAB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vocab")
+
+
+def read_word_list(path):
+    """One word per line, '#' comments, blank lines ignored. Missing file -> []."""
+    out = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                w = line.split("#", 1)[0].strip()
+                if w:
+                    out.append(w)
+    except (OSError, UnicodeDecodeError):
+        pass
+    return out
+
+
+def builtin_vocabulary(app=None):
+    """Bundled dictionaries: snippetlib/vocab/<app>_words.txt then cg_words.txt."""
+    files = []
+    if app:
+        files.append(os.path.join(VOCAB_DIR, "%s_words.txt" % app))
+    files.append(os.path.join(VOCAB_DIR, "cg_words.txt"))
+    words, seen = [], set()
+    for path in files:
+        for w in read_word_list(path):
+            if w.lower() not in seen:
+                seen.add(w.lower())
+                words.append(w)
+    return words
+
+
+def _compare_key(text):
+    """Lower-cased, version suffix and separators removed: 'Matte_Card v2' -> 'matte card'."""
+    text = re.sub(r"(?i)[\s_\-]*v\d+$", "", (text or "").strip())
+    return re.sub(r"[\s_\-\.]+", " ", text).strip().lower()
+
+
+def similar_snippets(libs, app, title, name=None, threshold=0.9):
+    """Existing snippets whose title or file name (almost) equals the given one.
+    libs = core.get_libraries(); -> [meta, ...] best match first, each with
+    _lib and _score (1.0 = identical ignoring case / separators / 'v2')."""
+    import difflib
+    keys = [k for k in (_compare_key(title), _compare_key(name)) if k]
+    if not keys:
+        return []
+    hits = []
+    for lib in libs:
+        if lib.get("missing"):
+            continue
+        try:
+            metas = scan_library(lib["path"])
+        except OSError:
+            continue
+        for meta in metas:
+            if meta.get("app") != app or meta.get("superseded_by"):
+                continue
+            best = 0.0
+            for other in (_compare_key(meta.get("title")), _compare_key(meta.get("name"))):
+                if not other:
+                    continue
+                for k in keys:
+                    if k == other:
+                        best = 1.0
+                    else:
+                        best = max(best, difflib.SequenceMatcher(None, k, other).ratio())
+            if best >= threshold:
+                meta = dict(meta, _lib=lib, _score=best)
+                hits.append(meta)
+    hits.sort(key=lambda m: (-m["_score"], m.get("created", "")), reverse=False)
+    return hits
 
 
 def split_words(text):
