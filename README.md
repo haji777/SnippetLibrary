@@ -82,6 +82,16 @@ nuke.pluginAddPath("C:/path/to/SnippetLibrary/nuke")  # このリポジトリの
 ```
 - Houdini: 現在の Network Editor の場所に `hou.data.createItemsFromData()`。コンテキストが違う場合は
   適切なコンテナ（geo / copnet ...）を自動作成してその中に展開
+- Houdini の保存は `hou.data.itemsAsData()`（レシピ API）ですが、Houdini 22.0 の同 API が落とす情報を
+  保存時に各ノードの `user_data` に追記し、ロード時に戻しています（ロード後に `user_data` からは消します）:
+  - VOP ノードごとのシェーダー言語（MaterialX / VEX）。配線の uniform/varying はこれで決まるので、
+    ロードは「ノード作成 → 言語設定 → 配線 → 子ネットワーク」の順
+  - DOP の Output ノードの display フラグ、TOP スケジューラの render フラグ（`createItemsFromData` が戻さない）
+  - スペアパラメータを持つノード（カメラ・ライト・geo オブジェクトは全部）のフォルダタグと
+    メニューの生成スクリプト・種類（戻さないとタブが 2 段に分かれ、カメラの Choose Resolution が空になる）
+  - 既定値のままロックされているパラメータのロック
+  - Copernicus の Output / Null / Switch / Wrangle などは名前の無い入力を持ち、そこに配線があると
+    `itemsAsData` 自体が IndexError で落ちます（Houdini 22.0.429）。保存中だけ回避パッチを当てています
 - Nuke: `nuke.nodePaste()` して DAG の中央へ移動。ブリッジ無しでも **Copy .nk** → Nuke で Ctrl+V が使えます
 - 保存時と違うバージョンにロードした場合は結果メッセージに警告を表示
 - DCC 内の **Load from Library...** ダイアログはビューアー無しでも使えます
@@ -188,3 +198,10 @@ compare_nodes.compare("/stage/editmaterial1", "/stage/editmaterial7")   # 差分
 compare_nodes.dump("/stage/editmaterial1", "C:/temp/editmaterial1.json")  # 1つを JSON に書き出し
 ```
 比較対象: ノードタイプ、全パラメータ（値・式・既定値かどうか）、パラメータテンプレート、入力接続、VOP のコネクタ名と型、フラグ、ユーザーデータ、エラー。
+
+### 往復テスト
+`hython tools/roundtrip_check.py [report.txt]` は SOP / OBJ / VOP(MaterialX+VEX 混在) / LOP(materiallibrary, sopmodify) /
+COP / DOP / CHOP / TOP / ROP のテストネットワークを作り、ライブラリと同じ手順で保存 → ロードして元と比較します。
+「ours」がこのライブラリのローダー、「hou.data」が素の `createItemsFromData` の結果で、差分の原因がどちらにあるか分かります。
+Houdini のバージョンを上げたときに実行してください（Houdini 22.0.429 で全コンテキスト差分なしを確認済み）。
+レポート内のファイルパスは `<path:ファイル名>` に伏せられます。

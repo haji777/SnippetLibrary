@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Houdini side: save selected network items as JSON (hou.data), load them back."""
 
+import contextlib
+import json
 import os
 
 import hou
@@ -86,9 +88,10 @@ def save_items(items, title, description="", tags=None, context=None, name=None,
     is saved as its next version and the old one is marked as superseded."""
     parent = items[0].parent()
     context = context or context_of(parent)
-    data = hou.data.itemsAsData(items, anchor_position=_anchor(items))
+    with recipe_workarounds():
+        data = hou.data.itemsAsData(items, anchor_position=_anchor(items))
     try:
-        _record_shader_language(data, parent)
+        _record_extras(data, parent)
     except Exception:
         pass  # worst case: the loader guesses MaterialX from the node types
     info = core.new_snippet("houdini", context, title, name=name, root=root)
@@ -110,6 +113,36 @@ def save_items(items, title, description="", tags=None, context=None, name=None,
         core.abort_snippet(info)
         raise
     return info
+
+
+@contextlib.contextmanager
+def recipe_workarounds():
+    """Houdini 22.0's recipe API (hou.data.itemsAsData) raises IndexError on a
+    Copernicus network when a node has a wire on an input beyond its named
+    inputs: the COP Output node reports no input names at all, so every COP
+    snippet with a connected Output node failed to save. Fall back to the plain
+    index; our loader wires by index just as well."""
+    try:
+        from hrecipes.api import networkitemconnection as nic
+    except ImportError:
+        yield
+        return
+    orig = getattr(nic, "_inputIndexToName", None)
+    if orig is None:
+        yield
+        return
+
+    def tolerant(item, index, *args, **kwargs):
+        try:
+            return orig(item, index, *args, **kwargs)
+        except IndexError:
+            return index
+
+    nic._inputIndexToName = tolerant
+    try:
+        yield
+    finally:
+        nic._inputIndexToName = orig
 
 
 def _selection_for_save():
@@ -209,12 +242,19 @@ def load(payload_path, meta=None):
 
 
 SHADER_LANG_KEY = "snippetlib_shader_language"
+PARM_UI_KEY = "snippetlib_parm_interface"
 
 
-def _record_shader_language(data, parent):
-    """hou.data does not capture a VOP node's shader language (MaterialX / VEX /
-    OSL ...). A VOP subnet's connector storage types depend on it (a MaterialX
-    string parameter is a uniform "ustring"), so remember it in user_data."""
+def _record_extras(data, parent):
+    """What hou.data does not carry, stored in each node's user_data (removed
+    again on load):
+
+    * SHADER_LANG_KEY: a VOP node's shader language (MaterialX / VEX / OSL ...).
+      A VOP subnet's connector storage types depend on it (a MaterialX string
+      parameter is a uniform "ustring").
+    * PARM_UI_KEY: folder tags and menu generator scripts of nodes whose
+      parameter interface hou.data re-applies on load (nodes with spare
+      parameters, "parmtemplates" in the data); that re-application drops both."""
     for name, d in data.items():
         if not isinstance(d, dict):
             continue
@@ -228,12 +268,64 @@ def _record_shader_language(data, parent):
                 lang = ""
             if lang:  # VEX too: inside a MaterialX subnet a VEX parameter must stay varying
                 d.setdefault("user_data", {})[SHADER_LANG_KEY] = lang
+        extras = _parm_interface_extras(live, interface=bool(d.get("parmtemplates")))
+        if extras:
+            d.setdefault("user_data", {})[PARM_UI_KEY] = json.dumps(extras, ensure_ascii=False)
         if isinstance(d.get("children"), dict):
-            _record_shader_language(d["children"], live)
+            _record_extras(d["children"], live)
         for path, e in (d.get("editables") or {}).items():
             inner = live.node(path)
             if inner is not None and isinstance(e.get("children"), dict):
-                _record_shader_language(e["children"], inner)
+                _record_extras(e["children"], inner)
+
+
+_record_shader_language = _record_extras  # old name
+
+
+def _parm_interface_extras(node, interface=True):
+    """{"tags": {folder name: tags}, "generators": {parm name: [script, language]},
+    "locked": [parm names]}. hou.data records the lock of a parameter only
+    together with a non-default value, so locks at default values (the 43
+    locked ramp parameters of a Karma ROP, a parameter a user locked without
+    changing it) come back unlocked. Tags / generators only matter when
+    hou.data re-applies the interface (interface=True)."""
+    tags, gens = {}, {}
+
+    def walk(templates):
+        for t in templates:
+            if isinstance(t, hou.FolderParmTemplate):
+                if t.tags():
+                    tags[t.name()] = dict(t.tags())
+                walk(t.parmTemplates())
+                continue
+            gen = getattr(t, "itemGeneratorScript", None)
+            if gen is None:
+                continue
+            menu = {}
+            if gen():
+                menu["gen"] = [gen(), t.itemGeneratorScriptLanguage().name()]
+            try:
+                if t.menuType() != hou.menuType.Normal:  # Mini / ControlNextParameter ... also dropped
+                    menu["type"] = t.menuType().name()
+            except hou.Error:
+                pass
+            if menu:
+                gens[t.name()] = menu
+
+    out = {}
+    try:
+        if interface:
+            walk(node.parmTemplateGroup().parmTemplates())
+        locked = [p.name() for p in node.parms() if p.isLocked()]
+    except hou.Error:
+        return None
+    if tags:
+        out["tags"] = tags
+    if gens:
+        out["generators"] = gens
+    if locked:
+        out["locked"] = locked
+    return out or None
 
 
 def _guess_shader_language(children):
@@ -290,6 +382,12 @@ def _create_level(parent, data, offset, clear, guess):
     made = hou.data.createItemsFromData(parent, shallow, offset_position=offset, clear_content=clear)
     for name, item in list(made.items()):
         d = data.get(name)
+        if isinstance(item, hou.Node) and isinstance(d, dict) and d.get("flags"):
+            _apply_flags(item, d["flags"])
+        if isinstance(item, hou.Node) and isinstance(d, dict) and PARM_UI_KEY in (d.get("user_data") or {}):
+            _repair_parm_templates(item, d["user_data"][PARM_UI_KEY])
+            if PARM_UI_KEY in item.userDataDict():
+                item.destroyUserData(PARM_UI_KEY)
         if not isinstance(item, hou.VopNode) or not isinstance(d, dict):
             continue
         lang = (d.get("user_data") or {}).get(SHADER_LANG_KEY)
@@ -312,6 +410,79 @@ def _create_level(parent, data, offset, clear, guess):
     return made
 
 
+FLAG_SETTERS = {"display": ("isDisplayFlagSet", "setDisplayFlag"), "render": ("isRenderFlagSet", "setRenderFlag"),
+                "template": ("isTemplateFlagSet", "setTemplateFlag"), "bypass": ("isBypassed", "bypass"),
+                "lock": ("isHardLocked", "setHardLocked"), "export": ("isExportFlagSet", "setExportFlag"),
+                "audio": ("isAudioFlagSet", "setAudioFlag"), "debug": ("isDebugFlagSet", "setDebugFlag"),
+                "highlight": ("isHighlightFlagSet", "setHighlightFlag"), "compress": ("isCompressFlagSet", "setCompressFlag")}
+
+
+def _apply_flags(node, flags):
+    """hou.data records every node's flags but createItemsFromData only restores
+    them for some categories: a DOP Output node comes back without its display
+    flag and a TOP scheduler without its render flag (Houdini 22.0). Apply what
+    the payload says, only where the live node differs."""
+    for key, want in flags.items():
+        getter, setter = FLAG_SETTERS.get(key, (None, None))
+        if setter is None or not hasattr(node, setter) or not hasattr(node, getter):
+            continue
+        try:
+            if bool(getattr(node, getter)()) != bool(want):
+                getattr(node, setter)(bool(want))
+        except hou.Error:
+            pass
+
+
+def _repair_parm_templates(node, recorded):
+    """When a node has spare parameters (every camera / light / geo object has
+    them), hou.data re-applies the whole parameter interface on load and that
+    copy drops two things (Houdini 22.0): folder tags such as
+    sidefx::switcher (the spare tabs then show up as a second tab row) and the
+    item generator scripts of menus (the camera's Choose Resolution menu comes
+    back empty). Put back what _parm_interface_extras recorded at save time."""
+    try:
+        extras = json.loads(recorded) if isinstance(recorded, str) else recorded
+        live = node.parmTemplateGroup()
+    except (ValueError, hou.Error):
+        return
+    changed = False
+    for name, tags in (extras.get("tags") or {}).items():
+        t = live.find(name)
+        if isinstance(t, hou.FolderParmTemplate) and dict(t.tags()) != tags:
+            t.setTags(dict(t.tags(), **tags))
+            live.replace(name, t)
+            changed = True
+    for name, menu in (extras.get("generators") or {}).items():
+        t = live.find(name)
+        if t is None or not hasattr(t, "itemGeneratorScript"):
+            continue
+        if isinstance(menu, list):  # first payload format: [script, language]
+            menu = {"gen": menu}
+        fixed = False
+        if menu.get("gen") and t.itemGeneratorScript() != menu["gen"][0]:
+            t.setItemGeneratorScript(menu["gen"][0])
+            t.setItemGeneratorScriptLanguage(getattr(hou.scriptLanguage, menu["gen"][1], hou.scriptLanguage.Python))
+            fixed = True
+        if menu.get("type") and t.menuType().name() != menu["type"] and hasattr(hou.menuType, menu["type"]):
+            t.setMenuType(getattr(hou.menuType, menu["type"]))
+            fixed = True
+        if fixed:
+            live.replace(name, t)
+            changed = True
+    if changed:
+        try:
+            node.setParmTemplateGroup(live)
+        except hou.Error as exc:
+            print("SnippetLibrary: could not repair parameter interface of %s: %s" % (node.path(), exc))
+    for name in extras.get("locked") or []:
+        parm = node.parm(name)
+        if parm is not None and not parm.isLocked():
+            try:
+                parm.lock(True)
+            except hou.Error:
+                pass
+
+
 def _wire(parent, made, name, w):
     """Recreate one input connection from hou.data's {"from", "from_index", "to_index"}.
     Indices are ints, or connector names in COP / VOP networks. A source that is
@@ -321,21 +492,34 @@ def _wire(parent, made, name, w):
     src = made.get(w.get("from"))
     if src is None and w.get("from"):
         src = parent.item(w["from"]) if hasattr(parent, "item") else parent.node(w["from"])
-    if dst is None or src is None or not isinstance(dst, hou.Node):
+    if dst is None or src is None:
         return
     fi, ti = w.get("from_index", 0), w.get("to_index", 0)
     try:
-        if isinstance(ti, str) or isinstance(fi, str):
-            in_name = ti if isinstance(ti, str) else dst.inputNames()[ti]
-            if isinstance(src, hou.Node):
-                out_name = fi if isinstance(fi, str) else src.outputNames()[fi]
-                dst.setNamedInput(in_name, src, out_name)
-            else:  # dots / indirect inputs have a single, unnamed output
-                dst.setInput(dst.inputNames().index(in_name), src, 0)
-        else:
-            dst.setInput(ti, src, fi)
+        if isinstance(dst, hou.NetworkDot):  # a dot has one unnamed input
+            dst.setInput(src, _output_index(src, fi))
+            return
+        if not isinstance(dst, hou.Node):
+            return
+        in_names = dst.inputNames()
+        named_in = isinstance(ti, str) or (isinstance(fi, str) and ti < len(in_names))
+        if named_in and isinstance(src, hou.Node):
+            in_name = ti if isinstance(ti, str) else in_names[ti]
+            out_name = fi if isinstance(fi, str) else src.outputNames()[fi]
+            dst.setNamedInput(in_name, src, out_name)
+        else:  # plain index (SOP ...), dots / indirect inputs, or a COP input beyond the named ones (Output node)
+            in_index = in_names.index(ti) if isinstance(ti, str) else ti
+            dst.setInput(in_index, src, _output_index(src, fi))
     except (hou.Error, ValueError, IndexError) as exc:
         print("SnippetLibrary: could not wire %s[%s] <- %s[%s]: %s" % (name, ti, w.get("from"), fi, exc))
+
+
+def _output_index(src, fi):
+    if isinstance(fi, int):
+        return fi
+    if isinstance(src, hou.Node):
+        return list(src.outputNames()).index(fi)
+    return 0  # dots and indirect inputs have a single output
 
 
 def _data_center(data):

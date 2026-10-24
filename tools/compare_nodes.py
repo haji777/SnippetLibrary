@@ -81,20 +81,30 @@ def describe(node):
         d["hda"] = defn.libraryFilePath()
     d["parms"] = {}
     for parm in node.parms():
-        if parm.name() in IGNORE_PARMS:
-            continue
-        d["parms"][parm.name()] = _parm_info(parm)
+        try:
+            pname = parm.name()
+            if pname in IGNORE_PARMS:
+                continue
+            d["parms"][pname] = _parm_info(parm)
+        except hou.Error as exc:  # parameter interface regenerated while being read
+            d.setdefault("parm_errors", []).append(str(exc))
     try:
         d["parm_templates"] = node.parmTemplateGroup().asCode()
     except hou.Error as exc:
         d["parm_templates"] = "ERROR: %s" % exc
     d["spare_parms"] = sorted(p.name() for p in node.spareParms())
     inputs = []
-    for c in node.inputConnections():
-        src = c.inputNode()
-        inputs.append({"to": c.inputName() if hasattr(c, "inputName") else c.inputIndex(),
-                       "from": src.name() if src else None,
-                       "from_output": c.outputName() if hasattr(c, "outputName") else c.outputIndex()})
+    try:
+        for c in node.inputConnections():
+            try:
+                src = c.inputNode()
+                inputs.append({"to": c.inputName() if hasattr(c, "inputName") else c.inputIndex(),
+                               "from": src.name() if src else None,
+                               "from_output": c.outputName() if hasattr(c, "outputName") else c.outputIndex()})
+            except hou.Error as exc:  # connection vanished while being described (regenerating network)
+                inputs.append({"error": str(exc)})
+    except hou.Error as exc:
+        inputs.append({"error": str(exc)})
     d["inputs"] = inputs
     d["vop"] = _vop_info(node)
     flags = {}
