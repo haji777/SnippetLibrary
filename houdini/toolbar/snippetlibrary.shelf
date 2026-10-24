@@ -2,6 +2,7 @@
 <shelfDocument>
   <toolshelf name="snippetlibrary" label="SnippetLibrary">
     <memberTool name="snippetlib_save"/>
+    <memberTool name="snippetlib_overwrite"/>
     <memberTool name="snippetlib_load"/>
     <memberTool name="snippetlib_viewer"/>
   </toolshelf>
@@ -10,6 +11,12 @@
     <helpText><![CDATA[Save the selected network items to the Snippet Library.]]></helpText>
     <script scriptType="python"><![CDATA[import snippetlib.houdini_io as m
 m.save_selected_dialog()]]></script>
+  </tool>
+
+  <tool name="snippetlib_overwrite" label="Lib Overwrite" icon="BUTTONS_save">
+    <helpText><![CDATA[Save the selection as a new version of an existing snippet; the old one is marked as superseded.]]></helpText>
+    <script scriptType="python"><![CDATA[import snippetlib.houdini_io as m
+m.overwrite_selected_dialog()]]></script>
   </tool>
 
   <tool name="snippetlib_load" label="Lib Load" icon="BUTTONS_download">

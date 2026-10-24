@@ -7,5 +7,10 @@
       <scriptCode><![CDATA[import snippetlib.houdini_io as m
 m.save_selected_dialog()]]></scriptCode>
     </scriptItem>
+    <scriptItem id="opmenu.snippetlib_overwrite">
+      <label>Overwrite Exist Snippet (New Version)...</label>
+      <scriptCode><![CDATA[import snippetlib.houdini_io as m
+m.overwrite_selected_dialog()]]></scriptCode>
+    </scriptItem>
   </menu>
 </menuDocument>

@@ -30,6 +30,7 @@ try:
 
         _menu = nuke.menu("Nuke").addMenu("SnippetLibrary")
         _menu.addCommand("Save Selection to Library...", _snippetlib.save_selected_dialog)
+        _menu.addCommand("Overwrite Exist Snippet (New Version)...", _snippetlib.overwrite_selected_dialog)
         _menu.addCommand("Load from Library...", _snippetlib.show_browser)
         _menu.addSeparator()
         _menu.addCommand("Open Viewer", _snippetlib.open_viewer)

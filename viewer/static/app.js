@@ -8,7 +8,7 @@ const APP_INFO = {
 
 const S = {
   state: null, snippets: [], view: null, timer: null,
-  filters: { apps: new Set(), contexts: new Set(), users: new Set(), libs: new Set(), crown: false, q: "", sort: "new" },
+  filters: { apps: new Set(), contexts: new Set(), users: new Set(), libs: new Set(), crown: false, old: true, q: "", sort: "new" },
 };
 
 // ------------------------------------------------------------------ helpers
@@ -172,6 +172,9 @@ function drawFilters(side, redraw) {
   put(side, 
     h("button", { class: "crownfilter" + (F.crown ? " on" : ""), onclick: () => { F.crown = !F.crown; redraw(); } },
       crownSvg(), "殿堂入りのみ", h("em", { text: S.snippets.filter(s => s.crown).length })),
+    S.snippets.some(s => s.superseded_by) ? h("label", { class: "oldtoggle" },
+      h("input", { type: "checkbox", checked: F.old, onchange: e => { F.old = e.target.checked; redraw(); } }),
+      " 旧バージョンも表示", h("em", { text: S.snippets.filter(s => s.superseded_by).length })) : null,
     group("Software", "app", "apps", v => appBadge(v, true)),
     group("User", "user", "users", v => userChip(v)),
     group("Context", "context", "contexts", v => ctxBadge(v)),
@@ -186,7 +189,7 @@ function filtered() {
   const F = S.filters, q = F.q.trim().toLowerCase();
   const pass = (set, v) => !set.size || set.has(v);
   let items = S.snippets.filter(s => pass(F.apps, s.app) && pass(F.contexts, s.context) &&
-    pass(F.users, s.user) && pass(F.libs, s.lib) && (!F.crown || s.crown));
+    pass(F.users, s.user) && pass(F.libs, s.lib) && (!F.crown || s.crown) && (F.old || !s.superseded_by));
   if (q) {
     items = items.filter(s => q.split(/\s+/).every(word =>
       [s.title, s.desc, s.user, s.context, s.app, s.app_version, (s.tags || []).join(" "), (s.types || []).join(" ")]
@@ -234,7 +237,8 @@ function drawResults(main, redraw) {
 
 function row(s, redraw) {
   const p = profile(s.user);
-  return h("a", { class: "row" + (s.crown ? " crowned" : ""), href: `#/s/${s.lib}/${encodeURI(s.rel)}`, style: { "--c": p.color, "--app": (APP_INFO[s.app] || {}).color } },
+  return h("a", { class: "row" + (s.crown ? " crowned" : "") + (s.superseded_by ? " old" : ""), href: `#/s/${s.lib}/${encodeURI(s.rel)}`,
+    title: s.superseded_by ? "新しいバージョンに置き換えられています" : "", style: { "--c": p.color, "--app": (APP_INFO[s.app] || {}).color } },
     crownButton(s.crown, async () => {
       try {
         await api("/api/update", { lib: s.lib, rel: s.rel, crown: !s.crown });
@@ -296,9 +300,22 @@ async function showDetail(lib, rel) {
       h("button", { class: "btn", text: "Open folder", onclick: () => api("/api/reveal", { lib, rel }).catch(e => toast(e.message, "error")) }),
       copyToBox(),
       h("button", { class: "btn danger", title: "削除（_trash フォルダへ移動）", text: "🗑", onclick: confirmDelete }),
-      loadBox);
+      loadBox, versionBanner());
     drawLoad(loadBox);
   };
+
+  // ---- "superseded by" / "supersedes" links (meta values are "<library root>|<rel>")
+  const refLink = ref => {
+    const [root, r] = String(ref).split("|");
+    const l = S.state.libraries.find(x => x.path.replace(/\\/g, "/").toLowerCase() === (root || "").toLowerCase());
+    return l ? h("a", { href: `#/s/${l.id}/${encodeURI(r)}`, text: r.split("/").pop() }) : h("code", { text: r || ref });
+  };
+  function versionBanner() {
+    if (meta.superseded_by) return h("div", { class: "verbanner" }, "⚠ 旧バージョンです。新しいバージョン → ", refLink(meta.superseded_by),
+      meta.superseded ? h("span", { class: "muted", text: `（${meta.superseded.replace("T", " ")}）` }) : null);
+    if (meta.supersedes) return h("div", { class: "verbanner" }, `v${meta.version || 2} — 旧バージョン: `, refLink(meta.supersedes));
+    return null;
+  }
 
   // ---- title: click the pencil (or double-click the title) to rename
   let editingTitle = false;

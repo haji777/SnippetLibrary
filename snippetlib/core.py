@@ -554,6 +554,74 @@ def read_snippet(root, rel):
             "dir": sdir, "md": md, "payload": payload}
 
 
+def naming_vocabulary(roots, app=None, limit=20):
+    """Help the save dialog: recent titles / file names, every tag (most used
+    first) and the words they are made of, collected from the given libraries."""
+    titles, names, tag_count, word_count = [], [], {}, {}
+    seen_t, seen_n = set(), set()
+    metas = []
+    for root in roots:
+        try:
+            metas.extend(scan_library(root))
+        except OSError:
+            continue
+    metas.sort(key=lambda m: m.get("created", ""), reverse=True)
+    for m in metas:
+        if app and m.get("app") != app:
+            continue
+        t, n = (m.get("title") or "").strip(), (m.get("name") or "").strip()
+        if t and t not in seen_t:
+            seen_t.add(t)
+            titles.append(t)
+        if n and n not in seen_n:
+            seen_n.add(n)
+            names.append(n)
+        for tag in m.get("tags") or []:
+            tag_count[tag] = tag_count.get(tag, 0) + 1
+        for word in split_words(t) + split_words(n):
+            word_count[word] = word_count.get(word, 0) + 1
+    tags = sorted(tag_count, key=lambda k: (-tag_count[k], k.lower()))
+    words = sorted((w for w in word_count if len(w) > 1), key=lambda k: (-word_count[k], k.lower()))
+    return {"titles": titles[:limit], "names": names[:limit], "tags": tags, "words": words}
+
+
+def split_words(text):
+    """'GS_Key+DespillComp v2' -> ['GS', 'Key', 'Despill', 'Comp', 'v2']: split on
+    separators and camelCase, drop pure numbers."""
+    out = []
+    for chunk in re.split(r"[\s_\-\.\+/,:;()\[\]]+", text or ""):
+        for w in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+|[^\x00-\x7f]+", chunk):
+            if w and not w.isdigit():
+                out.append(w)
+    return out
+
+
+def bump_version(text, sep=" "):
+    """'Foo' -> 'Foo v2', 'Foo v2' -> 'Foo v3' (sep='_' for file names)."""
+    text = (text or "").strip()
+    m = re.search(r"(?i)^(.*?)[\s_\-]*v(\d+)$", text)
+    if m:
+        return "%s%sv%d" % (m.group(1).rstrip(" _-"), sep, int(m.group(2)) + 1)
+    return "%s%sv2" % (text, sep) if text else ""
+
+
+def mark_superseded(old_root, old_rel, new_root, new_rel):
+    """Link an old snippet to the one that replaces it. The old one keeps its
+    files; viewers show it struck through, DCC browsers hide it."""
+    old_md = find_md(resolve_rel(old_root, old_rel))
+    new_md = find_md(resolve_rel(new_root, new_rel))
+    if not old_md or not new_md:
+        raise ValueError("snippet not found")
+    old_ref = "%s|%s" % (old_root.replace("\\", "/"), old_rel.replace("\\", "/"))
+    new_ref = "%s|%s" % (new_root.replace("\\", "/"), new_rel.replace("\\", "/"))
+    for path, key, ref in ((old_md, "superseded_by", new_ref), (new_md, "supersedes", old_ref)):
+        meta, body = parse_md(read_text(path))
+        meta[key] = ref
+        if key == "superseded_by":
+            meta["superseded"] = now_iso()
+        write_text_atomic(path, dump_md(meta, body))
+
+
 def trash_snippet(root, rel):
     """Delete = move the whole snippet folder to <root>/_trash/<app>/<user>/<context>/.
     Nothing is erased; move the folder back to restore it."""

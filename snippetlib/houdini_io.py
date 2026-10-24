@@ -80,7 +80,10 @@ def _enrich(net, parent):
                 _enrich(node["network"], inner)
 
 
-def save_items(items, title, description="", tags=None, context=None, name=None, root=None):
+def save_items(items, title, description="", tags=None, context=None, name=None, root=None,
+               supersede=None):
+    """supersede = meta of an existing snippet (with _lib / rel): the new snippet
+    is saved as its next version and the old one is marked as superseded."""
     parent = items[0].parent()
     context = context or context_of(parent)
     data = hou.data.itemsAsData(items, anchor_position=_anchor(items))
@@ -96,34 +99,56 @@ def save_items(items, title, description="", tags=None, context=None, name=None,
             _enrich(graph["network"], parent)
         except Exception:
             pass  # the plain JSON is enough for the viewer
-        core.finalize_snippet(info, description, tags, graph, extra={
-            "scene": hou.hipFile.basename(), "source_path": parent.path()})
+        extra = {"scene": hou.hipFile.basename(), "source_path": parent.path()}
+        if supersede:
+            extra["version"] = int(supersede.get("version") or 1) + 1
+        core.finalize_snippet(info, description, tags, graph, extra=extra)
+        if supersede:
+            core.mark_superseded(supersede["_lib"]["path"], supersede["rel"], info["root"],
+                                 os.path.relpath(info["dir"], info["root"]).replace("\\", "/"))
     except Exception:
         core.abort_snippet(info)
         raise
     return info
 
 
-def save_selected_dialog():
-    from . import qtui
-    start_bridge()
+def _selection_for_save():
     items = _selected_items()
     if not items:
         hou.ui.displayMessage("保存するノードを選択してください。", title="Snippet Library")
-        return
-    parents = {i.parent().path() for i in items}
-    if len(parents) > 1:
+        return None
+    if len({i.parent().path() for i in items}) > 1:
         hou.ui.displayMessage("同じネットワーク内のノードだけを選択してください。",
                               title="Snippet Library")
+        return None
+    return items
+
+
+def save_selected_dialog(supersede=None):
+    from . import qtui
+    start_bridge()
+    items = _selection_for_save()
+    if not items:
         return
     count = len([i for i in items if isinstance(i, hou.Node)])
     values = qtui.ask_save("houdini", context_of(items[0].parent()), None, count,
-                           hou.qt.mainWindow())
+                           hou.qt.mainWindow(), prefill=supersede)
     if not values:
         return
     info = save_items(items, values["title"], values["description"], values["tags"],
-                      name=values["name"], root=values["root"])
+                      name=values["name"], root=values["root"], supersede=supersede)
     hou.ui.setStatusMessage("Snippet Library: saved %s" % info["dir"])
+
+
+def overwrite_selected_dialog():
+    """Pick an existing snippet, then save the selection as its new version."""
+    from . import qtui
+    start_bridge()
+    if not _selection_for_save():
+        return
+    old = qtui.pick_snippet("houdini", hou.qt.mainWindow())
+    if old:
+        save_selected_dialog(supersede=old)
 
 
 # ---------------------------------------------------------------------- load

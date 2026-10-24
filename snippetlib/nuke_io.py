@@ -81,8 +81,10 @@ def _parent_of(nodes):
         return nuke.root()
 
 
-def save_nodes(title, description="", tags=None, context="comp", name=None, root=None):
-    """Saves the current selection."""
+def save_nodes(title, description="", tags=None, context="comp", name=None, root=None,
+               supersede=None):
+    """Saves the current selection. supersede = meta of the snippet this one
+    replaces (new version); the old one is marked as superseded."""
     info = core.new_snippet("nuke", context, title, name=name, root=root)
     try:
         # nodeCopy / nodePaste choke on non-ASCII paths (e.g. a Japanese title), so
@@ -96,27 +98,46 @@ def save_nodes(title, description="", tags=None, context="comp", name=None, root
             _enrich(graph["network"], _parent_of(nuke.selectedNodes()))
         except Exception:
             pass  # the parsed .nk is enough for the viewer
-        core.finalize_snippet(info, description, tags, graph, extra={
-            "scene": os.path.basename(nuke.root().name())})
+        extra = {"scene": os.path.basename(nuke.root().name())}
+        if supersede:
+            extra["version"] = int(supersede.get("version") or 1) + 1
+        core.finalize_snippet(info, description, tags, graph, extra=extra)
+        if supersede:
+            core.mark_superseded(supersede["_lib"]["path"], supersede["rel"], info["root"],
+                                 os.path.relpath(info["dir"], info["root"]).replace("\\", "/"))
     except Exception:
         core.abort_snippet(info)
         raise
     return info
 
 
-def save_selected_dialog():
+def save_selected_dialog(supersede=None):
     from . import qtui
     start_bridge()
     nodes = nuke.selectedNodes()
     if not nodes:
         nuke.message("保存するノードを選択してください。")
         return
-    values = qtui.ask_save("nuke", _guess_context(nodes), CONTEXTS, len(nodes), _main_window())
+    values = qtui.ask_save("nuke", _guess_context(nodes), CONTEXTS, len(nodes), _main_window(),
+                           prefill=supersede)
     if not values:
         return
     info = save_nodes(values["title"], values["description"], values["tags"],
-                      values["context"] or "comp", name=values["name"], root=values["root"])
+                      values["context"] or "comp", name=values["name"], root=values["root"],
+                      supersede=supersede)
     nuke.tprint("Snippet Library: saved %s" % info["dir"])
+
+
+def overwrite_selected_dialog():
+    """Pick an existing snippet, then save the selection as its new version."""
+    from . import qtui
+    start_bridge()
+    if not nuke.selectedNodes():
+        nuke.message("保存するノードを選択してください。")
+        return
+    old = qtui.pick_snippet("nuke", _main_window())
+    if old:
+        save_selected_dialog(supersede=old)
 
 
 # ---------------------------------------------------------------------- load
